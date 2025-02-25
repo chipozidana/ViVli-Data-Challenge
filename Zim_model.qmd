@@ -1,0 +1,215 @@
+---
+title: "Zimbabwe AMR data"
+format: html
+editor: visual
+---
+
+```{r}
+library(readxl)
+library(tidyverse)
+Zimbabwe_AMR<- read_excel("C:/Users/zidanac/OneDrive - biust.ac.bw/Vivili_data_challenge/Zimbabwe_data_combined.xlsx", 
+    sheet = "combined")
+
+View(Zimbabwe_AMR)
+
+##drug family code
+######################################################
+##Drug Classification
+Access= c('Amikacin','amoxicillin', 'Amoxycillin', 'clavulanic acid', 'Ampicillin', 'Penicillin', 'Clindamycin', 'Gentamicin','Metronidazole',  'Sulfamethoxazole', 'Trimethoprim', 'Trimethoprim/sulphamethoxazole', 'Erythromycin','Cefazolin','Cefotaxime', 'Nitrofurantoin'  )
+
+Watch= c('Azithromycin', 'Cefixime','Ceftazidime', 'Ceftriaxone', 'Ciprofloxacin', 'Clarithromycin','Meropenem', 'Piperacillin','Tazobactam', 'Vancomycin',  'Imipenem', 'Levofloxacin', 'Moxifloxacin', 'Ertapenem', 'Cefuroxime', 'Norfloxacin', 'Nalidixic acid', 'Chloramphenicol')
+
+Reserve= c('Colistin', 'Linezolid', 'Cefepime')
+
+Other = c('Cefoxitin', 'Minocycline', 'Tigecyclin', 'Aztreonam', 'Aztreonam_avibactam', 'Ceftaroline', 'Ceftaroline_avibactam', 'Daptomycin', 'Doripenem', 'Gatifloxacin', 'Oxacillin', 'Quinupristin_dalfopristin', 'Sulbactam', 'Teicoplanin', 'Tetracycline', 'Ceftolozane_tazobactam')
+
+Zimbabwe_AMR$Drug_class <- NA
+Zimbabwe_AMR$Drug_class[Zimbabwe_AMR$Drug %in% Access] <- "Access"
+Zimbabwe_AMR$Drug_class[Zimbabwe_AMR$Drug %in% Watch] <- "Watch"
+Zimbabwe_AMR$Drug_class[Zimbabwe_AMR$Drug %in% Reserve] <- "Reserve"
+Zimbabwe_AMR$Drug_class[Zimbabwe_AMR$Drug %in% Other] <- "Other"
+
+
+
+
+
+## Pivot Longer by Drug
+
+ZIM_dat <- Zimbabwe_AMR|>
+          pivot_longer(cols=c('Susceptible','R_Inter'),
+            names_to='Resistance_Status',
+                    values_to='Status_count'           
+          )   
+## Create seasons
+Summer <- c('Nov', 'Dec','Jan', 'Feb')
+
+Autum <- c('March','April','May')
+
+Winter<-c('June', 'July','Aug')
+
+ZIM_dat$Season <-NA
+
+ZIM_dat$Season[ZIM_dat$Month %in% Summer]<- 'Summer'
+ZIM_dat$Season[ZIM_dat$Month %in% Autum]<- 'Autum'
+ZIM_dat$Season[ZIM_dat$Month %in% Winter]<- 'Winter'
+#ZIM_dat$Season[ZIM_dat$Season %in% summer]<- 'summer'
+#########Graphs                      
+                       
+ D1= ZIM_dat%>%
+  group_by(Resistance_Status, Pathogen, source_type) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )##filter resistant onl
+
+
+ggplot(D1, aes(source_type, Pathogen)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  scale_fill_gradient(low="white", high="blue") +
+  theme_bw()+
+  facet_grid(~Resistance_Status)+
+  theme(axis.text.x = element_text(angle = 45, hjust=1, size =8))+
+  theme(axis.text.y = element_text(angle = 45, hjust=1, size =8))+
+  scale_x_discrete(labels=c("1"="Circulatory", "2"="Skin/Wound", "3"= "Respiratory", "4"= "Genitourinary", "5"="Gastrointestinal", "6" ="Central Nervous", "7"= "Other"))+
+ labs(title = "Pathogen infection Patterns by Site of Infection ", x="Pathogen Family", y= "Source of Infection", color= "Proportion")
+
+                      
+                       
+                       
+```
+
+You can add options to executable code like this
+
+```{r}
+#| echo: false
+ library(dplyr)
+Zimbabwe_AMR|>
+  distinct(Pathogen)
+
+##summarise drug rsistance by family
+DrugFS= Zimbabwe_AMR|>
+  group_by(Drug_class, source_type, R_Inter) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )##filter resistant onl
+
+##Pathogen and Site of infect
+ggplot(DrugFS, aes(source_type, fill= Drug_class)) +                           # Create heatmap with ggplot2
+  geom_bar(position='fill')+
+  theme_classic()+
+  scale_fill_brewer('Drug Class', palette='Spectral')+
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=45, hjust=1))+
+  geom_text(
+    aes(label=signif(..count.. / tapply(..count.., ..x.., sum)[as.character(..x..)], digits=1)),
+    stat="count",
+    position=position_fill(vjust=0.5)) +
+  labs(title = "Resistance Patterns by Pathogen Site of Infection ", x="Site of Infection",  y= "Proportion")
+  
+###Pathogen and Time
+DrugPM= Zimbabwe_AMR|>
+  group_by(Drug_class, Month, R_Inter) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )
+
+ggplot(DrugPM, aes(Drug_class, fill= Month)) +                           # Create heatmap with ggplot2
+  geom_bar(position='fill')+
+  theme_classic()+
+  scale_fill_brewer('Month', palette='Spectral')+
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=45, hjust=1))+
+  geom_text(
+    aes(label=signif(..count.. / tapply(..count.., ..x.., sum)[as.character(..x..)], digits=1)),
+    stat="count",
+    position=position_fill(vjust=0.5)) +
+  labs(title = "Pathogen Resistance Patterns by Time of Year", x="Pathogen",  y= "Proportion")
+##filter resi
+
+###Pathogen and Time
+DrugPS= Zimbabwe_AMR|>
+  group_by(source_type, Month, Susceptible) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )
+
+ggplot(DrugPS, aes(source_type, fill= Month)) +                           # Create heatmap with ggplot2
+  geom_bar(position='fill')+
+  theme_classic()+
+  scale_fill_brewer('Month', palette='Spectral')+
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=45, hjust=1))+
+  geom_text(
+    aes(label=signif(..count.. / tapply(..count.., ..x.., sum)[as.character(..x..)], digits=1)),
+    stat="count",
+    position=position_fill(vjust=0.5)) +
+  labs(title = "Pathogen Susceptible Patterns by Time of Year", x="Pathogen",  y= "Proportion")
+##filter resi
+
+###Pathogen and Time
+DrugD= Zimbabwe_AMR|>
+  group_by(Pathogen, Drug, R_Inter) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )
+
+ggplot(DrugD, aes(Drug, Pathogen)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  theme_classic()+
+  scale_fill_brewer('Pathogen', palette='Spectral')+
+  theme(axis.text.x = element_text(angle=45, hjust=1)) +
+  labs(title = "Pathogen Susceptible Patterns by Time of Year", x="Pathogen",  y= "Proportion")
+##filter resi
+
+
+
+
+
+ggplot(Zimbabwe_AMR, aes(Month, R_Inter, color =Drug_class))+geom_point()
+
+
+
+
+
+```
+
+The `echo: false` option disables the printing of code (only output is displayed).
+
+# Zim Model
+
+```{r}
+## convert variables 
+
+ZIM_dat$source_type <- factor(ZIM_dat$source_type)
+ZIM_dat$Drug_class <- factor(ZIM_dat$Drug_class)
+ZIM_dat$Resistance_Status <- factor(ZIM_dat$Resistance_Status)
+ZIM_dat$Month <- factor(ZIM_dat$Month)
+ZIM_dat$Pathogen <- factor(ZIM_dat$Pathogen)
+ZIM_dat$Source <- factor(ZIM_dat$Source)
+
+##the model for resistenca
+
+ZIm_R <- ZIM_dat|>
+            filter(Resistance_Status=="R_Inter")
+
+summary(b1<-glm(Resistance_Status~Pathogen+Season+Drug_class+source_type, data = ZIM_dat, family = binomial))
+            
+zimmod <- glm(Status_count~ Pathogen+Season+Drug_class, 
+              data = ZIm_R,
+              family = "quasipoisson")
+
+
+library(DHARMa)
+mdOut <- simulateResiduals(fittedModel = zimmod)
+plot(mdOut)
+
+library(pscl)
+ 
+summary(h1<-hurdle(Status_count~ Pathogen+Month+Drug_class|Resistance_Status, 
+              data = ZIm_R, dist = "poisson",
+              zero.dist = 'poisson'))
+
+chisq.test(ZIM_dat$Resistance_Status, ZIM_dat$Season)
+
+
+```

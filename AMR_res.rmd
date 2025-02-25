@@ -1,0 +1,3107 @@
+---
+title: "AMR Data Analysis"
+author: "DR C. Zidana"
+date: "7/11/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+###############################################
+##packages
+pacman::p_load(
+   rio,          # File import  here, 
+   # File locator
+   tidyverse,
+   vegan,
+   ROSE,
+   caret,
+   tidyr, # Data management + ggplot2 graphics
+   #epicontacts,  # Analysing transmission networks
+   #EpiNow2,      # Rt estimation
+   #EpiEstim,     # Rt estimation
+   #projections,  # Incidence projections
+   #incidence2,   # Handling incidence data
+   #epitrix,      # Useful epi functions
+   #distcrete,     # Discrete delay distributions
+    #slider, # for calculating moving averages
+   dplyr,
+   readxl, 
+   ggpubr,
+   magrittr,
+   readr,
+ writexl,
+ nnet,
+ foreign,
+ caret,
+ cluster,
+ jtools,
+ #broom_mixed,
+ glmnet,
+ patchwork,
+ ##train and test set
+randomForest,
+e1071 )      # for calculating moving averages within ggplot
+
+```
+
+## Data
+
+```{r data, echo=FALSE}
+AMR_data <- read_csv("C:/Users/zidanac/Desktop/2023_06_15 atlas_antibiotics.csv")
+#View(AMR_data)
+attach(AMR_data)
+
+############################################
+## Creating Political Regions Cleaning
+USA= 'United States'
+Germany= "Germany"
+France ="France"
+E_ASIA =c("Hong kong", "China", "Korea South","Mongolia", "Japan","Taiwan")
+
+SE_ASIA= c( "Singapore","Thailand","India","Philippines","Myanmar","Malaysia","Indonesia","Vietnam","Cambodia")
+
+W_ASIA= c("Afghanstan","Bangladesh","Bhutan","Pakistan","India","Nepal","Maldives","Sri Lanka")
+
+WEU = c('Belgium','Netherlands','Switzerland','Austria','Monaco','Luxembourg','Liechtenstein')
+
+EEU =c('Czech Republic','Hungary','Russia','Poland','Romania','Ukraine','Bulgaria','Slovak Republic','Ukraine', 'Belarus', 'Moldova')
+
+NEU =c('Denmark','Ireland','Iceland','Sweden','Lithuania','Finland','Latvia','Estonia','Norway','United Kingdom' )
+
+SEU =c('Spain','Italy','Portugal','Greece','Croatia','Slovenia','Serbia','Andorra','Malta','Montenegro')
+
+North_America= c('Mexico','Canada',  'Costa Rica','Panama','Jamaica','Dominican Republic','Guatemala','Honduras','El Salvador','Puerto Rico','Nicaragua')
+
+South_America =c('Argentina','Colombia','Brazil','Chile','Venezuela')
+
+Oceania= c('Australia','New Zealand')
+
+Africa=c('Cameroon','Ivory Coast','South Africa','Nigeria','Kenya','Namibia','Uganda','Malawi','Ghana','Mauritius')
+
+Middle_East= c("Saudi Arabia","Israel","Qatar","Oman","Lebanon","Turkey", "Morocco","Egypt","Tunisia" )
+
+AMR_data$Region_pol <- NA
+AMR_data$Region_pol[AMR_data$Country %in% USA] <- 1
+AMR_data$Region_pol[AMR_data$Country %in% France] <- 2
+AMR_data$Region_pol[AMR_data$Country %in% Germany] <- 3
+AMR_data$Region_pol[AMR_data$Country %in% E_ASIA] <- 4
+AMR_data$Region_pol[AMR_data$Country %in% W_ASIA] <- 5
+AMR_data$Region_pol[AMR_data$Country %in% SE_ASIA] <- 6
+AMR_data$Region_pol[AMR_data$Country %in% EEU] <- 7
+AMR_data$Region_pol[AMR_data$Country %in% SEU] <- 8
+AMR_data$Region_pol[AMR_data$Country %in% WEU] <- 9
+AMR_data$Region_pol[AMR_data$Country %in% NEU] <- 10
+AMR_data$Region_pol[AMR_data$Country %in% North_America] <- 11
+AMR_data$Region_pol[AMR_data$Country %in% South_America] <- 12
+AMR_data$Region_pol[AMR_data$Country %in% Africa] <- 13
+AMR_data$Region_pol[AMR_data$Country %in% Oceania] <- 14
+AMR_data$Region_pol[AMR_data$Country %in% Middle_East] <- 15
+
+
+#######################################
+
+#### Combine Speciality
+General= c('Medicine General', 'Pediatric General', 'Surgery General')
+ICU= c('Medicine ICU','Pediatric ICU','Surgery ICU','General Unspecified ICU')
+Other =c('Other','None Given')
+Clinic_office= c('Clinic / Office', 'Nursing Home / Rehab')
+Emergency_room ="Emergency Room"
+
+AMR_data$Speciality_Co <- NA
+AMR_data$Speciality_Co[AMR_data$Speciality %in% General] <- 1
+AMR_data$Speciality_Co[AMR_data$Speciality %in% ICU] <- 2
+AMR_data$Speciality_Co[AMR_data$Speciality %in% Clinic_office] <- 3
+AMR_data$Speciality_Co[AMR_data$Speciality %in% Emergency_room] <- 4
+AMR_data$Speciality_Co[AMR_data$Speciality %in% Other] <- 5
+
+
+
+#BY Phenotype
+MSSA="MSSA"
+MRSA="MRSA"
+BL_Pos=c("(BL Pos)", "ESBL")
+BL_Neg= "(BL Neg)"
+
+AMR_data$Phenotype_Co <- NA
+AMR_data$Phenotype_Co[AMR_data$Phenotype %in% MRSA] <- 1
+AMR_data$Phenotype_Co[AMR_data$Phenotype %in% BL_Pos] <- 2
+AMR_data$Phenotype_Co[AMR_data$Phenotype %in% MSSA] <- 3
+AMR_data$Phenotype_Co[AMR_data$Phenotype %in% BL_Neg] <- 4
+
+#######################################################################################
+##Source of infection classification
+
+Circulatory = c('Blood', 'Circulatory Other', 'Placenta', 'Heart', 'Blood Vessels', 'Lymph Nodes', 'Lymphatic Fluid', 'Peripheral Nerves', 'Spleen', 'Liver')
+
+Skin_Wound = c('Skin', 'Wound', 'Ear', 'Exudate', 'Abscess', 'Skin: Other', 'Eye', 'Cellulitis', 'Burn', 'Drains', 'Furuncle', 'Impetiginous lesions', 'Muscle', 'Intergumentary (Skin Nail Hair)', 'Carbuncle', 'Head', 'Nails', 'Hair', 'Decubitus')
+
+Respiratory =c ('Sputum', 'Endotracheal aspirate', 'Bronchus', 'Trachea', 'Broncoalveolar Lavage', 'Respiratory: Other', 'Throat', 'Nose', 'Lungs', 'Respiratory Sinuses', 'Nasopharyngeal Aspirate', 'Nasotracheal aspirate', 'Pleural fluid', 'HEENT: Other')
+
+Genitourinary =c('Urine', 'Catheters', 'Vagina', 'Genitourinary: Other', 'Bladder', 'Urethra', 'Kidney', 'Prostate', 'Uterus', 'Ureter', 'Penis', 'Testis', 'Ovary', 'Cervix', 'Vas Deferens', 'Fallopian tubes')
+
+Gastrointestinal= c('Feces/Stool', 'Gastric Abscess', 'Ulcer', 'Abdominal fluid', 'Mouth', 'Gall bladder', 'Intestinal: Other', 'Bile', 'Colon', 'Stomach','Rectum', 'Pancreas', 'Esophagus', 'Appendix', 'Diverticulum')
+
+Central_nervous = c('CSF', 'Spinal Cord', 'CNS: Other', 'Brain')
+
+Other= c('Tissue Fluid', 'None Given', 'Bodily Fluids', 'Bone', 'Aspirate', 'Synovial Fluid','Instruments: Other', 'Bone Marrow', 'Thymus', 'Skeletal: Other', 'Thoracentesis Fluid', 'Peritoneal Fluid', 'Paracentesis Fluid')
+
+#cREATING COMBINE SOURCE VARIABLE
+AMR_data$Source_Co <- NA
+AMR_data$Source_Co[AMR_data$Source %in%Circulatory] <- 1
+AMR_data$Source_Co[AMR_data$Source %in%Skin_Wound] <- 2
+AMR_data$Source_Co[AMR_data$Source %in%Respiratory] <- 3
+AMR_data$Source_Co[AMR_data$Source %in%Genitourinary] <- 4
+AMR_data$Source_Co[AMR_data$Source %in%Gastrointestinal] <- 5
+AMR_data$Source_Co[AMR_data$Source %in%Central_nervous] <- 6
+AMR_data$Source_Co[AMR_data$Source %in% Other] <- 7
+
+
+
+##############################################################
+##join by income 
+Income_Group <- read_csv("C:/Users/zidanac/Desktop/Income_Group.csv")
+AMR_data_IN= left_join(AMR_data, Income_Group[,c(1,4)], by = "Country")
+
+#Joining ISO codes and regions
+
+Country_Region_Isocode <- read_csv("C:/Users/zidanac/Desktop/Country_Region_Isocode.csv")
+
+
+AMR_data_iso = left_join(AMR_data_IN, Country_Region_Isocode[,c(1:3,6,7,10)], by = "Country")
+
+
+###DRug removal zero complete case
+
+#library("writexl")
+#write_xlsx(AMR_data_iso,"C:/Users/zidanac/Desktop/Vivli_Atlas.xlsx")
+```
+
+##Overall Drug and Family
+
+```{r overal1 df }
+##Take drugs withmore 10% and above completeness
+Drug_df= AMR_data_iso[, c("Family","Country","Country_code2", "Income_level", "Region-code",  "Gender" ,"Age Group","In / Out Patient","Year" , "Region_pol", "Speciality_Co", "Phenotype_Co","Source_Co","Amikacin_I","Amoxycillin clavulanate_I", "Ampicillin_I" , "Azithromycin_I", "Cefepime_I",        "Ceftazidime_I" , "Ceftriaxone_I","Clindamycin_I" ,"Erythromycin_I" ,"Imipenem_I" ,"Levofloxacin_I", "Linezolid_I",   
+ "Meropenem_I" , "Penicillin_I", "Piperacillin tazobactam_I",  "Vancomycin_I", "Ampicillin sulbactam_I",  "Cefixime_I",   "Ceftazidime avibactam_I",  "Ciprofloxacin_I", "Colistin_I",  "Gentamicin_I",  "Moxifloxacin_I" ) ] 
+##Remove other drugs
+
+drug_family= Drug_df[,-c(2,5)] %>% pivot_longer(cols=c("Amikacin_I","Amoxycillin clavulanate_I", "Ampicillin_I" , "Azithromycin_I", "Cefepime_I", "Ceftazidime_I" , "Ceftriaxone_I","Clindamycin_I" ,"Erythromycin_I" ,"Imipenem_I" ,"Levofloxacin_I", "Linezolid_I",   
+ "Meropenem_I" , "Penicillin_I", "Piperacillin tazobactam_I",  "Vancomycin_I", "Ampicillin sulbactam_I",  "Cefixime_I",   "Ceftazidime avibactam_I",  "Ciprofloxacin_I", "Colistin_I",  "Gentamicin_I",  "Moxifloxacin_I"),
+                    names_to='Drug',
+                    values_to='Resistance_Status')
+
+######################################################
+##Drug Classification
+Access= c('Amikacin_I','amoxicillin', 'Amoxycillin clavulanate_I', 'clavulanic acid', 'Ampicillin_I', 'Penicillin_I', 'Clindamycin_I', 'Gentamicin_I','Metronidazole_I',  'Sulfamethoxazole_I', 'Trimethoprim_I', 'Erythromycin_I')
+
+Watch= c('Azithromycin_I', 'Cefixime_I','Ceftazidime_I', 'Ceftriaxone_I', 'Ciprofloxacin_I', 'Clarithromycin_I','Meropenem_I', 'Piperacillin_I','Tazobactam_I', 'Vancomycin_I',  'Imipenem_I', 'Levofloxacin_I', 'Moxifloxacin_I', 'Ertapenem_I')
+
+Reserve= c('Colistin_I', 'Linezolid_I')
+
+Other = c('Cefoxitin_I', 'Minocycline_I', 'Tigecyclin_I', 'Aztreonam_I', 'Aztreonam_avibactam_I', 'Ceftaroline_I', 'Ceftaroline_avibactam_I', 'Daptomycin_I', 'Doripenem_I', 'Gatifloxacin_I', 'Oxacillin_I', 'Quinupristin_dalfopristin_I', 'Sulbactam_I', 'Teicoplanin_I', 'tetracycline_I', 'Ceftolozane_tazobactam_I')
+
+drug_family$Drug_class <- NA
+drug_family$Drug_class[drug_family$Drug %in% Access] <- "Access"
+drug_family$Drug_class[drug_family$Drug %in% Watch] <- "Watch"
+drug_family$Drug_class[drug_family$Drug %in% Reserve] <- "Reserve"
+drug_family$Drug_class[drug_family$Drug %in% Other] <- "Other"
+
+
+##change resistance statuss to factor with 2 levels
+drug_family$Resistance_Status<- as.factor(drug_family$Resistance_Status)
+drug_family$Resistance_Status<-recode(drug_family$Resistance_Status, Intermediate='Resistant')
+
+levels(drug_family$Resistance_Status)
+
+## combine all ammoxicin family
+drug_family$Drug<- as.factor(drug_family$Drug)
+drug_family$Drug<-recode(drug_family$Drug, amoxicillin='Amoxycillin clavulanate_I')
+
+
+```
+
+##Proportions
+
+```{r varprops}
+
+attach(drug_family)
+dim(drug_family)
+drug_family<- drug_family|>
+  rename(Pat_type = `In / Out Patient`)
+drug_family <- drug_family|>
+  rename(Age_grp = `Age Group`)
+
+dd1<-drug_family|>drop_na()
+##Proportions
+dd1|>
+  group_by(Drug_class) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round((FREQ / sum(FREQ))*100, 3))
+###Get proportions before droping missing values
+
+dd1|>
+  group_by(Drug) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round((FREQ / sum(FREQ))*100, 3))
+
+####################
+dd1|>
+  group_by(Resistance_Status, Drug_class) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round((FREQ / sum(FREQ))*100, 3))
+
+dd1|>
+  group_by(Region_pol, Speciality_Co) |>
+  summarise(FREQ= n())|>
+  mutate(PROP = round((FREQ / sum(FREQ))*100, 3))
+
+chisq.test(dd1$Pat_type, dd1$Resistance_Status)
+
+```
+
+
+#Graphs
+
+```{r drug_level}
+#write_csv(drug_family,"C:/Users/zidanac/Desktop/Drug_family.csv")
+
+##summarise drug resistance by family
+DrugFS= dd1%>%
+  group_by(Resistance_Status, Family, Source_Co) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )##filter resistant onl
+
+
+ggplot(DrugFS, aes( Family, Source_Co)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  scale_fill_gradient(low="white", high="blue") +
+  theme_cleveland()+
+  facet_grid(~Resistance_Status)+
+  theme(axis.text.x = element_text(angle = 45, hjust=1, size =8))+
+  theme(axis.text.y = element_text(angle = 45, hjust=1, size =8))+
+  scale_x_discrete(labels=c("1"="Circulatory", "2"="Skin/Wound", "3"= "Respiratory", "4"= "Genitourinary", "5"="Gastrointestinal", "6" ="Central Nervous", "7"= "Other"))+
+ labs(title = "Pathogen infection Patterns by Site of Infection ", x="Pathogen Family", y= "Source of Infection", color= "Proportion")
+
+
+```
+
+
+```{r family_country}
+#write_csv(drug_family,"C:/Users/zidanac/Desktop/Drug_family.csv")
+
+##summarise drug rsistance by family
+DrugFRC= drug_family%>%
+  group_by(Resistance_Status, Family, Region_pol) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )##filter resistant onl
+
+
+ggplot(DrugFRC, aes(Family,Region_pol  )) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  scale_fill_gradient(low="white", high="blue") +
+  theme_cleveland()+
+  facet_grid(~Resistance_Status)+
+  theme(axis.text.x = element_text(angle = 45, hjust=1,, size =8 ))+
+  theme(axis.text.y = element_text(angle = 45, hjust=1, size =8))+
+ labs(title = "Pathogen infection Patterns by Region ", x= "Region",  color= "Proportion")+ 
+  scale_y_discrete(labels=c("USA", "France",  "German", "E_ASIA", "W_ASAIA", "SE_ASIA", "EEU",  "SEU", "WEU", "NEU", "NAM", "SAM", "AFRICA" ,  "AUS-NEW", "MDE"))
+   
+ggsave(fam_source.png, dpi=400, dev='png')
+
+
+```
+
+```{r family_drugclass}
+#write_csv(drug_family,"C:/Users/zidanac/Desktop/Drug_family.csv")
+
+##summarise drug rsistance by family
+DrugRCC= drug_family%>%
+  group_by(Resistance_Status, Family, Drug_class) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )##filter resistant onl
+
+DrugRCC= dd1%>%
+  group_by(Resistance_Status, Family, Drug_class) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(PROP>0 )##filter resistant onl
+
+
+
+ggplot(DrugRCC, aes(  Family, Drug_class )) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  scale_fill_gradient(low="white", high="blue") +
+  theme_cleveland()+
+  facet_grid(~Resistance_Status)+
+  theme(axis.text.x = element_text(angle = 45, hjust=1,size =8 ))+
+  theme(axis.text.y = element_text(angle = 45, hjust=1, size =8))+
+ labs(title = "Pathogen Family by Drug Category Patterns",   color= "Proportion")
+
+
+
+```
+
+## Overall Drug by Family of Pathogens
+
+```{r drug_family}
+#write_csv(drug_family,"C:/Users/zidanac/Desktop/Drug_family.csv")
+
+##summarise drug rsistance by family
+DrugF= drug_family%>%
+  group_by(Drug,Resistance_Status, Family) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", PROP>0)##filter resistant only
+
+
+# Create heatmap with ggplot2
+  g2 <- ggplot(DrugF, aes( Drug, Family)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  scale_fill_gradient(low="white", high="blue") +
+  theme_cleveland()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))+
+theme(axis.text.y = element_text(angle = 45, hjust=1))+
+ labs(title = "Drug Resistance by Family", y ="Dug Family", x= "Drug", color= "Proportion") 
+g2      
+####################
+ # Alternative heatmap with ggplot2
+ggp <- ggplot(DrugF, aes(Drug, Family)) +                           
+  geom_tile(aes(fill = PROP))+scale_fill_distiller(palette = "RdPu") +
+  theme_bw() 
+
+ggsave("Drug_fam_path.png", dpi=300, dev='png', height=8, width=5, units="cm")
+```
+
+## DRug by Country
+
+```{r Drug by Country }
+
+DrugC= drug_family%>%
+  group_by(Drug,Resistance_Status, Country_code2) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", PROP>0)
+library(rworldmap)
+mapped_data <- joinCountryData2Map(DrugC, 
+                                   joinCode = "ISO2", 
+                                   nameJoinColumn = "Country_code2", 
+                                   suggestForFailedCodes = TRUE)
+
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+par(mai=c(0,0,0.2,0),xaxs="i",yaxs="i")
+
+mapCountryData(mapped_data, 
+               nameColumnToPlot = "PROP", 
+               colourPalette = "diverge",
+                 #cbbPalette[1:length(DrugC$PROP)],
+               borderCol = "black",
+              mapTitle = "Drug Resistance by Country",
+               catMethod = "FixedWidth",
+               addLegend =TRUE)
+ ggsave("Drugres_country.png", dpi=300, dev='png', height=8, width=5, units="cm")              
+```
+
+## Drug Class by Country
+
+```{r Drug_class by Country }
+
+DrugCLC= drug_family%>%
+  group_by(Drug_class,Resistance_Status, Country_code2) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", Drug_class=="Watch", PROP>0)
+library(rworldmap)
+mapped_data1 <- joinCountryData2Map(DrugCLC, 
+                                   joinCode = "ISO2", 
+                                   nameJoinColumn = "Country_code2", 
+                                   suggestForFailedCodes = TRUE)
+
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+par(mai=c(0,0,0.2,0),xaxs="i",yaxs="i")
+
+p1=mapCountryData(mapped_data1, 
+               nameColumnToPlot = "PROP", 
+               colourPalette = "heat",
+                 #cbbPalette[1:length(DrugC$PROP)],
+               borderCol = "black",
+              mapTitle = "Watch Drug Resistance by Country",
+               catMethod = "fixedWidth",
+               addLegend =TRUE)
+
+#####Firstline
+DrugCLC1= drug_family%>%
+  group_by(Drug_class,Resistance_Status, Country_code2) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", Drug_class=="First_line", PROP>0)
+library(rworldmap)
+mapped_data2 <- joinCountryData2Map(DrugCLC1, 
+                                   joinCode = "ISO2", 
+                                   nameJoinColumn = "Country_code2", 
+                                   suggestForFailedCodes = TRUE)
+
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+par(mai=c(0,0,0.2,0),xaxs="i",yaxs="i")
+
+p2=mapCountryData(mapped_data2, 
+               nameColumnToPlot = "PROP", 
+               colourPalette = "heat",
+                 #cbbPalette[1:length(DrugC$PROP)],
+               borderCol = "black",
+              mapTitle = "First Line Drug Resistance by Country",
+               catMethod = "fixedWidth",
+               addLegend =TRUE)
+
+###Reserve
+
+   DrugCLC3= drug_family%>%
+  group_by(Drug_class,Resistance_Status, Country_code2) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", Drug_class=="Reserve", PROP>0)
+library(rworldmap)
+mapped_data3 <- joinCountryData2Map(DrugCLC3, 
+                                   joinCode = "ISO2", 
+                                   nameJoinColumn = "Country_code2", 
+                                   suggestForFailedCodes = TRUE)
+
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+par(mai=c(0,0,0.2,0),xaxs="i",yaxs="i")
+
+p3=mapCountryData(mapped_data3, 
+               nameColumnToPlot = "PROP", 
+               colourPalette = "heat",
+                 #cbbPalette[1:length(DrugC$PROP)],
+               borderCol = "black",
+              mapTitle = "Reserve Drug Resistance by Country",
+               catMethod = "fixedWidth",
+               addLegend =TRUE) 
+
+p2+p3+p1
+
+```
+
+## DRug by Region
+
+```{r Drug by Region }
+DrugR= drug_family%>%
+  group_by(Drug,Resistance_Status, Region_pol) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(Percent = round((FREQ / sum(FREQ)*100), 2))|>
+  filter(Resistance_Status=="Resistant", Percent>0)
+
+gR <- ggplot(DrugR, aes( Drug,Region_pol)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = Percent))+
+  scale_fill_gradient(low="white", high="red") +
+  theme_cleveland()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))+
+labs(title = "Drug Resistance by Region", y ="Geopolitical Region", x= "Drug", color= "Percent")
+gR
+ggsave("Drug_reg.png", dpi=300, dev='png', height=8, width=5, units="cm")
+```
+
+## Overall resistance by Year
+
+```{r Drug by Year, out.width="50%" }
+
+
+
+DrugYr= drug_family%>%
+  group_by(Drug,Resistance_Status, Year) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", PROP>0)
+
+DrugYr|> ggline("Year", "PROP",
+                facet.by =   "Drug", 
+                color = "Drug", 
+                title= "Overall Drug Resistnce Trends",
+                ylab = "Proportion" ,
+                )+
+  theme_void() +
+  theme(legend.position = "none")
+ggsave("Drug_res_trends.png", dpi=400, dev='png')
+
+```
+
+## Overall resistance by Source of Infection
+
+```{r Drug by Year, echo=FALSE }
+###Source byyDRug regeso
+DrugSS= drug_family%>%
+  group_by(Drug,Resistance_Status, Source_Co) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", PROP>0)
+
+DrugSS$Source_Co=as.factor(DrugSS$Source_Co)
+##bargraph
+DrugSS|> ggbarplot(x="Drug", y="PROP", fill = "Source_Co", ylab = "Proportion" , title = "Drug Resistance Proportion by Source of Infection")+
+  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position = "right")+
+    scale_fill_discrete( name= "Source",labels = c("Circulatory", "Skin/Wound", "Respiratory", "Genitourinary","Gastrointestinal","Central Nervous", "Other"))
+###Source by DRug regeso
+ggsave("Drug_infectionsite.png", dpi=400, dev='png')
+
+```
+
+## Overall resistance by Speciality
+
+```{r Drug by Year, echo=FALSE }
+###Source byyDRug regeso
+DrugSP= drug_family%>%
+  group_by(Drug,Resistance_Status, Speciality_Co) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", PROP>0)
+
+DrugSP$Speciality_Co=as.factor(DrugSP$Speciality_Co)
+##bargraph
+DrugSP|> ggbarplot(x="Drug", y="PROP", fill = "Speciality_Co", ylab = "Proportion" , title = "Drug Resistance Proportion by Speciality")+
+  theme(axis.text.x = element_text(angle = 45, hjust=1), legend.position = "right")+
+    scale_fill_discrete( name= "Speciality",labels = c("General", "ICU", "Clinic/Office/Home", "Emergency Room", "Other"))
+
+ggsave("Drug_Speciality.png", dpi=400, dev='png')
+
+```
+
+## DRug_Spciality and Region
+
+```{r drug_specil_reg}
+DrugSPR= drug_family%>%
+  group_by(Drug,Resistance_Status, Speciality_Co, Region_pol) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant", PROP>0)
+
+DrugSPR$Speciality_Co=as.factor(DrugSPR$Speciality_Co)
+DrugSPR$Region_pol=as.factor(DrugSPR$Region_pol)
+
+DrugSPR|> ggline(  x="Drug",y="PROP",
+                 linetype = "Speciality_Co", 
+                 color= "Speciality_Co",
+                 ylab = "Proportion" ,
+                 title = "Drug Resistance Proportion by Speciality and Region",
+                 facet.by = "Region_pol",
+                 panel.labs = list(Region_pol = c("USA", "France", "Germany", "E_ASIA", "W_ASIA", "SE_ASIA","E_EU","S_EU","W_EU","N_EU","N_AMR","S_AMR","AFRICA","AUS_NEW","MDE")))+
+  theme(axis.text.x.bottom = element_text(angle = 45, hjust=1), legend.position = "right")+
+  scale_linetype_discrete(name= "Speciality", labels = c("General", "ICU", "Clinic/Office/Home", "Emergency Room", "Other"))+
+scale_colour_discrete(name= "Speciality" ,labels = c("General", "ICU", "Clinic/Office/Home", "Emergency Room", "Other"))
+
+
+
+ggsave("Drug_spec_region.png", dpi=400, dev='png')
+
+
+```
+
+## DRug_Spciality and Income level
+
+```{r drug_income}
+
+DrugIC= drug_family%>%
+  group_by(Drug,Resistance_Status, Income_level) |>
+  summarise(FREQ= n())|>
+  drop_na()|>
+  mutate(PROP = round(FREQ / sum(FREQ), 2))|>
+  filter(Resistance_Status=="Resistant",Income_level!="Not categorised" ,PROP>0)
+
+ggplot(DrugIC, aes( x= Drug,y=Income_level)) +                           # Create heatmap with ggplot2
+  geom_tile(aes(fill = PROP))+
+  scale_fill_gradient(low="white", high="red") +
+  theme_cleveland()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))+
+labs(title = "Drug Resistance by Income", y ="Income level", x= "Drug", color= "Proportion")
+ 
+## y reorder
+
+#fct_reorder(Income_level,order,.desc   = T)
+
+```
+
+# OVerall Models
+
+```{r ovealmodels}
+main_dat <- drug_family|>
+  select(Resistance_Status,Family, Source_Co, Gender, Income_level, Drug_class, Region_pol, Speciality_Co, `Age Group`, `In / Out Patient`)|>
+  drop_na()
+
+main_dat <- main_dat|>
+  rename(Pat_type = `In / Out Patient`)
+main_dat <- main_dat|>
+  rename(Age_grp = `Age Group`)
+
+
+
+#################################
+
+main_dat$Family= as.factor(main_dat$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+main_dat$Income_level =as.factor(main_dat$Income_level)
+main_dat$Pat_type =as.factor(main_dat$Pat_type)
+main_dat$Gender =as.factor(main_dat$Gender)
+main_dat$Age_grp = as.factor(main_dat$Age_grp)
+#main_dat$Region_pol =as.factor(main_dat$Region_pol)
+main_dat$Speciality_Co = as.factor(main_dat$Speciality_Co) ##Other not found
+main_dat$Source_Co = as.factor(main_dat$Source_Co)
+main_dat$Drug_class <- as.factor(main_dat$Drug_class)
+#######
+
+
+##split
+index.all <- createDataPartition(main_dat$Resistance_Status, p = .70, list = FALSE)
+train.all <- main_dat[index.all,]
+test.all <- main_dat[-index.all,]
+library(ROSE)
+set.seed(123)
+train.bal <- ROSE(Resistance_Status~ ., data = train.all)$data
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+##logistic model
+full.mod <- train(Amikacin_I ~.,  
+                  data = train.bal,
+                  method = 'glm',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+###Evaluating the model
+ttrain.bal$ClassPredicted <- predict(full.mod, newdata = train.bal, "raw")
+test.all$ClassPredicted <- predict(full.mod, newdata = test.all, "raw")
+
+################# Building classification table
+##train set
+conf.amk.train <- table(train.bal$Resistance_Status, train.bal$ClassPredicted)
+round((sum(diag(conf.amk.train))/sum(conf.amk.train))*100,2)
+##test set
+conf.amk.test <- table(test.all$Resistance_Status, test.all$ClassPredicted)
+round((sum(diag(conf.amk.test))/sum(conf.amk.test))*100,2)
+
+###Accurary result
+full.mod$results
+
+
+##full model using random Forest()
+library(ranger)
+rf_full <- ranger(
+Resistance_Status~., 
+   data = train.bal, 
+   importance = "impurity",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_full$mtry
+rf_full$results
+##acurary
+sum(diag(rf_full$confusion.matrix)/sum(rf_full$confusion.matrix))
+##prediction error
+rf_full$prediction.error
+
+importance(rf_full)
+
+ImpData.f <- as.data.frame(importance(rf_full))
+ImpData.f$Var.Names <- row.names(ImpData.f)
+
+ggplot(ImpData.f, aes(x=Var.Names, y=importance(rf_full))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_full)), color="skyblue") +
+  geom_point(aes(size = importance(rf_full)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Full Model Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.full.pred <- predict(rf_2,
+                   data = test.all,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t.full=table(rf.full.pred$predictions, 
+     test.all$Resistance_Status)                   
+
+sum(diag(t.full))/sum(t.full)
+
+############################################################################
+### XGBOOST
+library(xgboost)
+set.seed(123)
+
+#define predictor and response variables in training set
+train_xf = data.matrix(train.bal[,-1])
+train_yf = train.bal[,1]
+
+#define predictor and response variables in testing set
+test_xf = data.matrix(test.all[,-1])
+test_yf = test.all[,1]
+
+#define final training and testing sets
+xgb_train.f = xgb.DMatrix(data = train_xf, label = train_yf)
+xgb_test.f = xgb.DMatrix(data = test_xf, label = test_yf)
+
+##the model
+#define watchlist
+output_vector = train.bal[,"Resistance_Status"] == "Resistant"
+
+watchlist = list(train=xgb_train.f, test=xgb_test.f)
+
+ctrl <- trainControl(method="repeatedcv", 
+                     number=10, 
+                     repeats=5,
+                     savePredictions=TRUE, 
+                     classProbs=TRUE,
+                     summaryFunction = multiClassSummary)
+
+full_xb.model = xgb.train(data = xgb_train.f,
+                         watchlist=watchlist,
+                         label = output_vector,
+                         trControl = ctrl,
+                         #params = list(
+                      #max_depth = 2, eta = 1, nthread = 2, objective = "binary:logistic"),
+                         #objective = "binary:logistic",
+                         nrounds = 1000)
+
+full.final = xgboost(data = xgb_train.f, max.depth = 3, nrounds = 1000, verbose = 0)
+summary(final)
+#use model to make predictions on test data
+pred_y = predict(full.final, xgb_test.f)
+
+f.prediction <- as.numeric(pred_y > 0.5)
+print(head(f.prediction))
+# performance metrics on the test data
+
+err <- mean(as.numeric(pred_y > 0.5) != test_yf)
+print(paste("test-error=", err))
+
+
+##
+xgb.importance(model = fill.final)
+full_xgb_imp <- xgb.importance(feature_names = full.final$feature_names,
+                          model = full.final)
+
+xgb.plot.importance(full_xgb_imp)
+
+
+```
+
+# First line Drug Models
+
+
+```{r fistline}
+Access_df<- drug_family[,-c(2,7)]|>##remove country and year
+                  drop_na()|>  
+                filter(Drug_class=="Access", Drug %in% c('Amikacin_I','Amoxycillin clavulanate_I', 'Ampicillin_I', 'Penicillin_I', 'Gentamicin_I','Metronidazole_I',  'Sulfamethoxazole_I', 'Trimethoprim_I', 'Erythromycin_I'))
+
+
+Reserve_df<- drug_family[,-c(2,7)]|>##remove country and year
+                  drop_na()|>  
+                filter(Drug_class=="Reserve" & Drug %in% c('Colistin_I', 'Linezolid_I'))
+
+Watch_df<- drug_family[,-c(2,7)]|>##remove country and year
+                  drop_na()|>  
+                filter(Drug_class=="Watch"& Drug %in% c('Azithromycin_I', 'Cefixime_I','Ceftazidime_I', 'Ceftriaxone_I', 'Ciprofloxacin_I','Levofloxacin_I','Vancomycin_I', 'Clarithromycin_I','Meropenem_I', 'Piperacillin_I','Tazobactam_I',   'Imipenem_I',  'Moxifloxacin_I', 'Ertapenem_I'))
+
+
+Other = c('Cefoxitin_I', 'Minocycline_I', 'Tigecyclin_I', 'Aztreonam_I', 'Aztreonam_avibactam_I', 'Ceftaroline_I', 'Ceftaroline_avibactam_I', 'Daptomycin_I', 'Doripenem_I', 'Gatifloxacin_I', 'Oxacillin_I', 'Quinupristin_dalfopristin_I', 'Sulbactam_I', 'Teicoplanin_I', 'tetracycline_I', 'Ceftolozane_tazobactam_I')
+
+# Prepare data for glmnet
+x_train <- model.matrix(Species ~ ., trainData)[,-1]
+y_train <- trainData$Species
+x_test <- model.matrix(Species ~ ., testData)[,-1]
+y_test <- testData$Species
+
+# Fit the model
+cvfit <- cv.glmnet(x_train, y_train, family = "binomial")
+
+# Make predictions
+predictions <- predict(cvfit, newx = x_test, s = "lambda.min", type = "class")
+
+# Create the confusion matrix
+conf_matrix <- confusionMatrix(as.factor(predictions), y_test)
+
+# Print the confusion matrix
+print(conf_matrix)
+```
+
+
+
+# Single Drug Models
+
+## Amikacin Resistance by Region
+
+```{r amikacin model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+#https://rpubs.com/SameerMathur/LR_Using_Caret_ISLR_CCDefault
+#https://remiller1450.github.io/s230f19/caret2.html
+Amikacin_df= Drug_df[,1:14]|>drop_na()
+ 
+##change resistance status to two levels
+
+Amikacin_df$Amikacin_I<-recode(Amikacin_df$Amikacin_I,Intermediate= "Resistant"  )
+
+##Class balancing
+
+barplot(prop.table(table(Amikacin_df$Amikacin_I)),
+        col = rainbow(2),
+        ylim = c(0, 0.7),
+        main = "Class Distribution")
+
+Amikacin_df <- Amikacin_df|>
+  rename(Pat_type = `In / Out Patient`)
+Amikacin_df <- Amikacin_df|>
+  rename(Age_grp = `Age Group`)
+###Creating numeric variables
+
+Amikacin_df$Family= as.factor(Amikacin_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Amikacin_df$Country= as.factor(Amikacin_df$Country)
+Amikacin_df$Country_code2= as.factor(Amikacin_df$Country_code2)
+Amikacin_df$Income_level =as.factor(Amikacin_df$Income_level)
+Amikacin_df$Pat_type =as.factor(Amikacin_df$Pat_type)
+Amikacin_df$Gender =as.factor(Amikacin_df$Gender)
+Amikacin_df$Age_grp = as.factor(Amikacin_df$Age_grp)
+Amikacin_df$Amikacin_I =as.factor(Amikacin_df$Amikacin_I)
+Amikacin_df$Region_pol =as.factor(Amikacin_df$Region_pol)
+Amikacin_df$Speciality_Co = as.factor(Amikacin_df$Speciality_Co) ##Other not found
+Amikacin_df$Source_Co = as.factor(Amikacin_df$Source_Co)
+Amikacin_df$Phenotype_Co = as.factor(Amikacin_df$Phenotype_Co) ##only one phetype available ommit
+Amikacin_df$Year = as.factor(Amikacin_df$Year)
+########################################################
+##Data split
+index.amk <- createDataPartition(Amikacin_df$Amikacin_I, p = .70, list = FALSE)
+train.amk <- Amikacin_df[index.amk,]
+test.amk <- Amikacin_df[-index.amk,]
+
+#################################
+# Train the model select variables needed
+train.amk.dat <- train.amk[,c(1,4,6,7,8,10,11,13,14)]
+train.amk.y <- train.amk$Amikacin_I
+## resampling by ROSE
+test.amk.dat <- test.amk[,c(1,4,6,7,8,10,11,13,14)]
+test.amk.y <- test.amk$Amikacin_I
+
+Amik_rose <- ROSE(Amikacin_I~., data = train.amk.dat, N = 844000, seed=123)$data
+table(Amik_rose$Amikacin_I)
+
+## oversampling
+
+over_sampled_data = ovun.sample(Amikacin_I ~ ., data = train.amk.dat, method = "over")$data
+
+under_sampled_data = ovun.sample(Amikacin_I ~ ., data = train.amk.dat, method = "under" )$data
+
+
+table(over_sampled_data$Amikacin_I)
+table(under_sampled_data$Amikacin_I)
+
+### Down sampling
+set.seed(123)
+
+##change ref to resistant
+train.amk$Amikacin_I <- relevel(train.amk$Amikacin_I, ref = "Resistant")
+# Set up repeated k-fold cross-validation
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+
+############################################################################ model using rose sample data
+set.seed(123)
+Amik.mod.rose <- train(Amikacin_I ~.,  
+                  data = Amik_rose,
+                  method = 'glmnet',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+##model coef from rose
+summary(Amik.mod.rose)
+##save in R for shuiny
+saveRDS(Amik.mod.rose, "Amik_mod.RDS")
+# Predicting the class for test dataset
+test.amk.dat$ClassPredicted <- predict(Amik.mod.rose, newdata = test.amk.dat , "raw")
+
+# Building classification table
+tab.amk <- table( test.amk.dat$ClassPredicted,test.amk.dat$Amikacin_I )
+tab.amk
+round((sum(tab.amk[1,2],tab.amk[2,1])/sum(tab.amk))*100,2)
+
+#Accurary result
+Amik.mod.rose$results
+
+
+
+################################################################
+## Random forest
+set.seed(123)
+library(ranger)
+rf_2 <- ranger(
+train.amk.dat$Amikacin_I~., 
+   data = train.amk.dat, 
+   importance = "impurity",
+   num.trees = 2000
+ )
+# remove missing vlaues before this call
+rf_2$mtry
+##acurary
+rf_2_Acc= sum(diag(rf_2$confusion.matrix)/sum(rf_2$confusion.matrix))
+rf_2_spec = sum(rf_2$confusion.matrix[1,1])/sum(rf_2$confusion.matrix[1,1],rf_2$confusion.matrix[2,1])
+rf_2_Sens= sum(rf_2$confusion.matrix[2,2])/sum(rf_2$confusion.matrix[2,2],rf_2$confusion.matrix[1,2])
+##prediction error
+rf_2$prediction.error
+
+print(rf_2) # view results
+
+##variable importance
+importance(rf_2)
+varImpPlot(rf_2, main = "Random forest: Variable importance" )
+
+
+ImpData <- as.data.frame(importance(rf_2))
+ImpData$Var.Names <- row.names(ImpData)
+
+ggplot(ImpData, aes(x=Var.Names, y=importance(rf_2))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_2)), color="skyblue") +
+  geom_point(aes(size = importance(rf_2)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="bottom",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )
+
+
+#######Prediction
+#resample test data 
+rose.test <- ROSE(Amikacin_I~., data = test.amk.dat, N = 211155, seed=123)$data
+table(rose.test$Amikacin_I)
+rf.pred <- predict(rf_2,
+                   data = rose.test,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t1=table(rf.pred$predictions, 
+     test.amk$Amikacin_I)
+
+
+
+##########################################################
+Amik.mod.over <- train(Amikacin_I ~., 
+                  data = over_sampled_data,
+                  method = 'glm',
+                  family= "binomial",
+                  trControl = train.control,
+                  metric = 'ROC')
+
+####################################################################
+ ##under sample model                 
+Amik.mod.under <- train(Amikacin_I ~.,  
+                  data = under_sampled_data,
+                  method = 'glm',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+##################################
+Amik.mod.dwn <- train(Amikacin_I ~ Family+Income_level+Pat_type+Gender+Age_grp+Region_pol+Speciality_Co+Source_Co, 
+                  data = dwn_train,
+                  method = 'glm',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+
+
+#################################################
+### XG BOOT MODELAmika
+
+#define predictor and response variables in training set
+train_x_amk = data.matrix(rose[,1:8])
+train_y_amk = rose[,9]
+
+#define predictor and response variables in testing set
+test_x_amk = data.matrix(test.amk.dat[,1:8])
+test_y_amk = test.amk.y
+
+#define final training and testing sets
+xgb_train_amk = xgb.DMatrix(data = train_x_amk, label = train_y_amk)
+xgb_test_amk = xgb.DMatrix(data = test_x_amk, label = test_y_amk)
+
+##the model
+#define watchlist
+output_vector = rose[,"Amikacin_I"] == "Resistant"
+
+watchlist_amk = list(train=xgb_train_amk, test=xgb_test_amk)
+
+ctrl <- trainControl(method="repeatedcv", 
+                     number=10, 
+                     repeats=5,
+                     savePredictions=TRUE, 
+                     classProbs=TRUE,
+                     summaryFunction = multiClassSummary)
+
+amk_xb.model = xgb.train(data = xgb_train_amk,
+                         watchlist=watchlist_amk,
+                         label = output_vector,
+                         trControl = ctrl,
+                         #params = list(
+                      #max_depth = 2, eta = 1, nthread = 2, objective = "binary:logistic"),
+                         #objective = "binary:logistic",
+                         nrounds = 1000)
+
+amk_xgb_final = xgboost(data = xgb_train_amk, label = train_y_amk,  max.depth = 3, nrounds = 1000, 
+                        verbose = 0)
+summary(amk_xgb_final)
+#use model to make predictions on test data
+amk_pred_y = predict(amk_xgb_final, xgb_test_amk)
+
+amk_prediction <- as.numeric(amk_pred_y > 0.5)
+print(head(amk_prediction))
+# performance metrics on the test data
+
+amk_err <- mean(as.numeric(amk_pred_y > 0.5) != test_y_amk)
+print(paste("test-error=", amk_err))
+
+
+##
+xgb.importance(model = amk_xgb_final)
+amk_xgb_imp <- xgb.importance(feature_names = amk_xgb_final$feature_names,
+                          model = amk_xgb_final)
+
+xgb.plot.importance(amk_xgb_imp)
+
+###comparisons
+
+confusion_matrix <- confusionMatrix(factor(amk_pred_y), factor(test_y_amk))
+print(confusion_matrix)
+
+
+
+
+
+######################################################
+
+
+```
+
+## Amoxylin Resistance Model
+
+```{r amoxy model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+Amoxy_df= Drug_df[,c(1:13,15)]|>drop_na()
+
+## Rename variable to tidy
+
+Amoxy_df <- Amoxy_df|>
+                    rename(Pat_type = `In / Out Patient`)
+Amoxy_df <- Amoxy_df|>
+              rename(Age_grp = `Age Group`)
+Amoxy_df <- Amoxy_df|>
+              rename(Amoxy_I = `Amoxycillin clavulanate_I`)
+
+##Making factor variables
+
+Amoxy_df$Family= as.factor(Amoxy_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Amoxy_df$Country= as.factor(Amoxy_df$Country)
+Amoxy_df$Country_code2= as.factor(Amoxy_df$Country_code2)
+Amoxy_df$Income_level =as.factor(Amoxy_df$Income_level)
+Amoxy_df$Pat_type=as.factor(Amoxy_df$Pat_type)
+Amoxy_df$Gender =as.factor(Amoxy_df$Gender)
+Amoxy_df$Age_grp = as.factor(Amoxy_df$Age_grp)
+Amoxy_df$Amoxy_I =as.factor(Amoxy_df$Amoxy_I)
+Amoxy_df$Region_pol =as.factor(Amoxy_df$Region_pol)
+Amoxy_df$Speciality_Co = as.factor(Amoxy_df$Speciality_Co) ##Other not found
+Amoxy_df$Source_Co = as.factor(Amoxy_df$Source_Co)
+Amoxy_df$Phenotype_Co = as.factor(Amoxy_df$Phenotype_Co) ##only one phetype available ommit
+Amoxy_df$Year = as.factor(Amoxy_df$Year)
+########################################################
+
+## Join Resistant and Intermediate
+Amoxy_df$Amoxy_I<-recode(Amoxy_df$Amoxy_I,Intermediate= "Resistant"  )
+
+##check class balance
+barplot(prop.table(table(Amoxy_df$Amoxy_I)),
+        col = rainbow(2),
+        ylim = c(0, 0.7),
+        main = "Class Distribution")
+
+### split data
+index.amox <- createDataPartition(Amoxy_df$Amoxy_I, p = .70, list = FALSE)
+train.amox <- Amoxy_df[index.amox,]
+test.amox <- Amoxy_df[-index.amox,]
+#################################
+##model
+
+train.control <- trainControl(method = "repeatedcv",
+                              number = 5,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+###select only variables of interest
+
+train.amox.dat <- train.amox[,c(1,4,6,7,8,10,11,13,14)]
+train.amox.y <- train.amox$Amoxy_I
+
+test.amox.dat <- test.amox[,c(1,4,6,7,8,10,11,13,14)]
+test.amox.y <- test.amox$Amoxy_I
+############################################################################
+
+## The model
+set.seed(123)
+Amoxy.mod <- train(Amoxy_I ~.,  
+                  data = train.amox.dat,
+                  method = 'glmnet',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+
+##########################################################################{}
+
+# Predicting the values for train dataset
+train.amox.dat$ClassPredicted <- predict(Amoxy.mod, newdata = train.amox.dat, "raw")
+
+# Building classification table
+tab_amy <- table(train.amox.dat$Amoxy_I, train.amox.dat$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tab_amy))/sum(tab_amy))*100,2)
+
+
+# Predicting the class for test dataset
+test1$ClassPredicted <- predict(Amoxy.mod, newdata = test.amox.dat, "raw")
+
+# Building classification table
+tab2 <- table(test1$Amoxy_I, test1$ClassPredicted)
+tab2
+round((sum(diag(tab2))/sum(tab2))*100,2)#59.33
+
+################################################################
+##Random Forest model
+
+set.seed(123)
+#install.packages(ranger, repos = "http://cran.r-project.org")
+
+library(ranger)
+rf_amox <- ranger(
+train.amox$Amoxy_I~., 
+   data = train.amox.dat[,-10], 
+   importance = "impurity",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_amox$mtry
+##accuracy
+amy_rf_Acc= sum(diag(rf_amox$confusion.matrix)/sum(rf_amox$confusion.matrix))
+amy_rf_spec = sum(rf_amox$confusion.matrix[1,1])/sum(rf_amox$confusion.matrix[1,1],rf_amox$confusion.matrix[2,1])
+amy_rf_Sens= sum(rf_amox$confusion.matrix[2,2])/sum(rf_amox$confusion.matrix[2,2],rf_amox$confusion.matrix[1,2])
+##prediction error
+rf_amox$prediction.error
+
+
+importance(rf_amox)
+
+ImpData <- as.data.frame(importance(rf_amox))
+ImpData$Var.Names <- row.names(ImpData)
+
+ggplot(ImpData, aes(x=Var.Names, y=importance(rf_amox))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_2)), color="skyblue") +
+  geom_point(aes(size = importance(rf_amox)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Amoxylin Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.amox.pred <- predict(rf_amox,
+                   data = test.amox.dat,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t1=table(rf.amox.pred$predictions, 
+     test.amox$Amoxy_I)
+
+sum(diag(t1))/sum(t1)
+
+
+
+###########################################
+## CXG bost amoxy
+set.seed(123)
+
+#define predictor and response variables in training set
+train_x_amox = data.matrix(train.amox.dat[,1:8])
+train_y_amox = train.amox.y
+
+#define predictor and response variables in testing set
+test_x_amox = data.matrix(test.amox.dat[,1:8])
+test_y_amox = test.amox.y
+
+#
+##convert labels to zero and 1
+train_y_amox <- as.numeric(as.factor(train_y_amox)) - 1
+test_y_amox <- as.numeric(as.factor(test_y_amox)) - 1
+
+#define final training and testing sets
+xgb_train_amox = xgb.DMatrix(data = train_x_amox, label = train_y_amox)
+xgb_test_amox = xgb.DMatrix(data = test_x_amox, label = test_y_amox)
+
+
+table(train_y_amox)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "error"
+)
+
+xgb_amox_Model <- xgb.train(
+  params = params,
+  data = xgb_train_amox,
+  nrounds = 110,
+  watchlist = list(train = xgb_train_amox, test = xgb_test_amox),
+  early_stopping_rounds = 10,
+  print_every_n = 10
+)
+
+##evaluations
+predictions <- predict(xgb_amox_Model, xgb_test_amox)
+predicted_labels <- ifelse(predictions > 0.5, 1, 0)
+confusionMatrix(factor(predicted_labels), factor(test_y_amox))
+##matrix
+
+
+```
+
+
+##Clindamycin model
+
+```{r clindmy model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+clinda_df<- Drug_df[,c(1,4, 6:8,10:13,21)]|>drop_na()
+
+
+##missing value count
+apply(clinda_df,2,function(x){sum(is.na(x))})
+##replace missing values by random forest
+#library(missForest)
+#Amp_df1 =Amp_df[,-c(2,3,5,9,12)]
+
+
+
+###Creating numeric variables
+
+clinda_df <- clinda_df|>
+  rename(Pat_type = `In / Out Patient`)
+
+clinda_df <- clinda_df|>
+  rename(Age_grp = `Age Group`)
+
+clinda_df <- clinda_df|>
+  rename(CLIND_I = Clindamycin_I)
+
+
+##Class balancing
+
+barplot(prop.table(table(clinda_df$CLIND_I)),
+        col = rainbow(2),
+        ylim = c(0, 0.7),
+        main = "Class Distribution")
+
+clinda_df$CLIND_I<-recode(clinda_df$CLIND_I,Intermediate= "Resistant"  )
+
+## Make factors
+clinda_df$Family= as.factor(clinda_df$Family) 
+#clinda_df$Country_code2= as.factor(clinda_df$Country_code2)
+clinda_df$Income_level =as.factor(clinda_df$Income_level)
+clinda_df$Pat_type =as.factor(clinda_df$Pat_type)
+clinda_df$Gender =as.factor(clinda_df$Gender)
+clinda_df$Age_grp = as.factor(clinda_df$Age_grp)
+clinda_df$CLIND_I =as.factor(clinda_df$CLIND_I)
+clinda_df$Region_pol =as.factor(clinda_df$Region_pol)
+clinda_df$Speciality_Co = as.factor(clinda_df$Speciality_Co) ##Other not found
+clinda_df$Source_Co = as.factor(clinda_df$Source_Co)
+clinda_df$Phenotype_Co = as.factor(clinda_df$Phenotype_Co) ##only one phetype available ommit
+#clinda_df$Year = as.factor(clinda_df$Year)
+########################################################
+
+##train and test set
+
+#library(caret)
+
+index_cl <- createDataPartition(clinda_df$CLIND_I, p = .70, list = FALSE)
+train_cl <- clinda_df[index_cl,]
+test_cl <- clinda_df[-index_cl,]
+#################################
+train.cl.dat <- train_cl[,c(1:10)]
+train.cl.y <- train_cl$CLIND_I
+##resampling by ROSE
+test.cl.dat <- test_cl[,c(1:9)]
+test.cl.y <- test_cl$CLIND_I
+
+library(ROSE)
+rose.cl <- ROSE(CLIND_I~., data = train.cl.dat, N = 670000, seed=123)$data
+table(rose.cl$CLIND_I)
+
+
+##model
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+Clinda.mod <- train(CLIND_I ~.,  
+                  data = rose.cl,
+                  method = 'glm',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+##PLotting coefficients
+##https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+#https://rpubs.com/yanliu/viz_multinomial_regression
+
+##########################################################################{}
+
+# Predicting the values for train dataset
+rose.cl$ClassPredicted <- predict(Clinda.mod, newdata = rose.cl, "raw")
+
+# Building classification table
+tab_cl <- table(rose.cl$CLIND_I, rose.cl$ClassPredicted)
+tab_cl
+# Calculating accuracy - sum of diagonal elements divided by total obs
+clind_acc <-round((sum(diag(tab_cl))/sum(tab_cl))*100,2) #79.49
+clind_spec <-round((tab_cl[1,1]/sum(tab_cl[2,1], tab_cl[1,1])*100),2)
+clind_sens <-round((tab_cl[2,2]/sum(tab_cl[2,2],tab_cl[1,2]))*100,2)
+# Predicting the class for test dataset
+test.cl.dat$ClassPredicted <- predict(Clinda.mod, newdata = test.cl.dat, "raw")
+
+# Building classification table
+tabc <- table(test.cl.y, test.cl.dat$ClassPredicted)
+tabc
+round((sum(tabc[1,2], tabc[2,1])/sum(tabc))*100,2) #[1] 79.48
+
+
+
+###############MACHINE Learning#############
+
+library(randomForest)
+set.seed(123)
+#install.packages(ranger, repos = "http://cran.r-project.org")
+
+library(ranger)
+rf_cl <- ranger(
+CLIND_I~., 
+   data = rose.cl[-11], 
+   #importance = "impurity_corrected",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_cl$mtry
+##acurary
+sum(diag(rf_cl$confusion.matrix)/sum(rf_cl$confusion.matrix))
+
+rf_cl$confusion.matrix
+
+clind_sen_rf <-round((rf_cl$confusion.matrix[2,2]/sum(rf_cl$confusion.matrix[2,2], rf_cl$confusion.matrix[1,2])*100),2)
+clind_spec_rf <-round((rf_cl$confusion.matrix[1,1]/sum(rf_cl$confusion.matrix[1,1],rf_cl$confusion.matrix[2,1]))*100,2)
+
+F1_clind_rf <-round((rf_cl$confusion.matrix[2,2]*2/sum(rf_cl$confusion.matrix[2,2]*2, rf_cl$confusion.matrix[1,2],rf_cl$confusion.matrix[2,1]))*100,2)
+##prediction error
+rf_cl$prediction.error
+
+importance(rf_cl)
+
+ImpData.cl <- as.data.frame(importance(rf_cl))
+
+ImpData.cl$Var.Names <- row.names(ImpData.cl)
+##
+ggplot(ImpData.cl, aes(x=Var.Names, y=importance(rf_cl))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_cl)), color="skyblue") +
+  geom_point(aes(size = importance(rf_cl)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Clindamycin Model Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.cl.pred <- predict(rf_cl,
+                   data = test.cl.dat,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t_cl=table( 
+     test.cl.y,rf.cl.pred$pred )
+
+Acc_cl<- sum(t_cl[2,1], t_cl[1,2])/sum(t_cl)
+clind_spec_rf <-round((t_cl[1,2]/sum(tab_cl[2,2], t_cl[1,2])*100),2)
+clind_sens_rf <-round((t_cl[2,1]/sum(tab_cl[2,1],t_cl[1,1]))*100,2)
+###############################################################################################
+
+##xgboost make this example reproducible
+library(xgboost)
+set.seed(123)
+
+#define predictor and response variables in training set
+train_x_cl = data.matrix(rose.cl[,1:9])
+train_y_cl = rose.cl[,10]
+
+#define predictor and response variables in testing set
+test_x_cl = data.matrix(test.cl.dat[,1:9])
+test_y_cl = test.cl.y
+
+#define final training and testing sets
+xgb_train_cl = xgb.DMatrix(data = train_x_cl, label = train_y_cl)
+xgb_test_cl = xgb.DMatrix(data = test_x_cl, label = test_y_cl)
+
+##the model
+#define watchlist
+##convert labels to zero and 1
+train_y_cl <- as.numeric(as.factor(train_y_cl)) - 1
+test_y_cl <- as.numeric(as.factor(test_y_cl)) - 1
+
+table(train_y_cl)
+
+param_cl <- list(
+  objective = "binary:logistic",
+  eval_metric = "error"
+)
+
+xgb_cl_Model <- xgb.train(
+  #params = param_cl,
+  data = xgb_train_cl,
+  nrounds = 280, ## best 275
+  watchlist = list(train = xgb_train_cl, test = xgb_test_cl),
+  early_stopping_rounds =20,
+  print_every_n = 10
+)
+
+##evaluations
+cl_predictions <- predict(xgb_cl_Model, xgb_test_cl)
+predicted_cl_labels <- ifelse(cl_predictions > 0.5, 1, 0)
+confusionMatrix(factor(predicted_cl_labels), factor(test.cl.y))
+
+## Variable IMPORTANCE
+xgb.importance(model = xgb_cl_Model)
+xgb_Imp_cl <- xgb.importance(feature_names = xgb_cl_Model$feature_names,
+                          model = xgb_cl_Model)
+
+xgb.plot.importance(xgb_Imp_cl)
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+###AMPICILIN MODELS
+
+```{r amp model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+Amp_df<- Drug_df[,c(1:13,16)]|>drop_na()
+
+##missing value count
+apply(Amp_df,2,function(x){sum(is.na(x))})
+##replace missing values by random forest
+library(missForest)
+Amp_df1 =Amp_df[,-c(2,3,5,9,12)]
+
+
+
+###Creating numeric variables
+
+Amp_df <- Amp_df|>
+  rename(Pat_type = `In / Out Patient`)
+
+Amp_df <- Amp_df|>
+  rename(Age_grp = `Age Group`)
+
+Amp_df <- Amp_df|>
+  rename(AMP_I = Ampicillin_I)
+
+
+##Class balancing
+
+barplot(prop.table(table(Amp_df$AMP_I)),
+        col = rainbow(2),
+        ylim = c(0, 0.7),
+        main = "Class Distribution")
+
+Amp_df$AMP_I<-recode(Amp_df$AMP_I,Intermediate= "Resistant"  )
+
+
+Amp_df$Family= as.factor(Amp_df$Family) 
+##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Amp_df$Country= as.factor(Amp_df$Country)
+Amp_df$Country_code2= as.factor(Amp_df$Country_code2)
+Amp_df$Income_level =as.factor(Amp_df$Income_level)
+Amp_df$Pat_type =as.factor(Amp_df$Pat_type)
+Amp_df$Gender =as.factor(Amp_df$Gender)
+Amp_df$Age_grp = as.factor(Amp_df$Age_grp)
+Amp_df$AMP_I =as.factor(Amp_df$AMP_I)
+Amp_df$Region_pol =as.factor(Amp_df$Region_pol)
+Amp_df$Speciality_Co = as.factor(Amp_df$Speciality_Co) ##Other not found
+Amp_df$Source_Co = as.factor(Amp_df$Source_Co)
+Amp_df$Phenotype_Co = as.factor(Amp_df$Phenotype_Co) ##only one phetype available ommit
+Amp_df$Year = as.factor(Amp_df$Year)
+########################################################
+
+##train and test set
+
+#library(caret)
+
+index2 <- createDataPartition(Amp_df$AMP_I, p = .70, list = FALSE)
+train2 <- Amp_df[index2,]
+test2 <- Amp_df[-index2,]
+#################################
+train.amp.dat <- train2[,c(1,4,6,7,8,10,11,13,14)]
+train.amp.y <- train2$AMP_I
+##resampling by ROSE
+test.amp.dat <- test2[,c(1,4,6,7,8,10,11,13,14)]
+test.amp.y <- test2$AMP_I
+
+library(ROSE)
+rose.amp <- ROSE(AMP_I~., data = train.amp.dat, N = 1141235, seed=123)$data
+table(rose.amp$AMP_I)
+
+
+##model
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+Amp.mod <- train(AMP_I ~.,  
+                  data = rose.amp,
+                  method = 'glm',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+##PLotting coefficients
+##https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+#https://rpubs.com/yanliu/viz_multinomial_regression
+
+##########################################################################{}
+
+# Predicting the values for train dataset
+rose.amp$ClassPredicted <- predict(Amp.mod, newdata = rose.amp, "raw")
+
+# Building classification table
+tab_amp <- table(rose.amp$AMP_I, rose.amp$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tab_amp))/sum(tab_amp))*100,2) #79.49
+
+# Predicting the class for test dataset
+test.amp.dat$ClassPredicted <- predict(Amp.mod, newdata = test.amp.dat, "raw")
+
+# Building classification table
+tab3 <- table(test.amp.dat$AMP_I, test.amp.dat$ClassPredicted)
+tab3
+round((sum(diag(tab3))/sum(tab3))*100,2) #[1] 79.48
+
+
+
+###############MACHINE Learning#############
+
+library(randomForest)
+set.seed(123)
+#install.packages(ranger, repos = "http://cran.r-project.org")
+
+library(ranger)
+rf_amp <- ranger(
+AMP_I~., 
+   data = rose.amp[-10], 
+   importance = "impurity_corrected",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_amp$mtry
+##acurary
+sum(diag(rf_amp$confusion.matrix)/sum(rf_amp$confusion.matrix))
+##prediction error
+rf_amp$prediction.error
+
+importance(rf_amp)
+
+ImpData.amp <- as.data.frame(importance(rf_amp))
+
+ImpData.amp$Var.Names <- row.names(ImpData.amp)
+##
+ggplot(ImpData.amp, aes(x=Var.Names, y=importance(rf_amp))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_amp)), color="skyblue") +
+  geom_point(aes(size = importance(rf_amp)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Ampicilin Model Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.amp.pred <- predict(rf_amp,
+                   data = test.amp.dat,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t2=table(rf.amp.pred$predictions, 
+     test.amp.dat$AMP_I)
+
+sum(diag(t2))/sum(t2)
+
+###############################################################################################
+
+##xgboost make this example reproducible
+library(xgboost)
+set.seed(123)
+
+#define predictor and response variables in training set
+train_x_amp = data.matrix(rose.amp[,1:8])
+train_y_amp = rose.amp[,9]
+
+#define predictor and response variables in testing set
+test_x_amp = data.matrix(test.amp.dat[,1:8])
+test_y_amp = test.amp.y
+
+#define final training and testing sets
+xgb_train_amp = xgb.DMatrix(data = train_x_amp, label = train_y_amp)
+xgb_test_amp = xgb.DMatrix(data = test_x_amp, label = test_y_amp)
+
+##the model
+#define watchlist
+##convert labels to zero and 1
+train_y_amp <- as.numeric(as.factor(train_y_amp)) - 1
+test_y_amp <- as.numeric(as.factor(test_y_amp)) - 1
+
+table(train_y_amp)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "error"
+)
+
+xgb_amp_Model <- xgb.train(
+  params = params,
+  data = xgb_train_amp,
+  nrounds = 280, ## best 275
+  watchlist = list(train = xgb_train_amp, test = xgb_test_amp),
+  early_stopping_rounds = 10,
+  print_every_n = 10
+)
+
+##evaluations
+amp_predictions <- predict(xgb_amp_Model, xgb_test_amp)
+predicted_amp_labels <- ifelse(amp_predictions > 0.5, 1, 0)
+confusionMatrix(factor(predicted_amp_labels), factor(test_y_amp))
+
+## Variable IMPORTANCE
+xgb.importance(model = xgb_amp_Model)
+xgb_Imp_AMP <- xgb.importance(feature_names = xgb_amp_Model$feature_names,
+                          model = xgb_amp_Model)
+
+xgb.plot.importance(xgb_Imp_AMP)
+
+
+
+
+```
+
+## Penicillin
+
+```{r penicillin model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+Pen_df= Drug_df[,c(1:13,27)]|>drop_na()
+
+
+
+###Creating numeric variables
+
+Pen_df$Family= as.factor(Pen_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Pen_df$Country= as.factor(Pen_df$Country)
+Pen_df$Country_code2= as.factor(Pen_df$Country_code2)
+Pen_df$Income_level =as.factor(Pen_df$Income_level)
+Pen_df$`In / Out Patient` =as.factor(Pen_df$`In / Out Patient`)
+Pen_df$Gender =as.factor(Pen_df$Gender)
+Pen_df$`Age Group` = as.factor(Pen_df$`Age Group`)
+Pen_df$Penicillin_I =as.factor(Pen_df$Penicillin_I)
+Pen_df$Region_pol =as.factor(Pen_df$Region_pol)
+Pen_df$Speciality_Co = as.factor(Pen_df$Speciality_Co) ##Other not found
+Pen_df$Source_Co = as.factor(Pen_df$Source_Co)
+Pen_df$Phenotype_Co = as.factor(Pen_df$Phenotype_Co) ##only one phetype available ommit
+Pen_df$Year = as.factor(Pen_df$Year)
+########################################################
+
+##train and test set
+
+
+indexP <- createDataPartition(Pen_df$Penicillin_I, p = .70, list = FALSE)
+trainP <- Pen_df[indexP,]
+testP <- Pen_df[-indexP,]
+#################################
+##model
+
+trainP$Penicillin_I <- relevel(trainP$Penicillin_I, ref = "Resistant")
+Pen_mod <- multinom(Penicillin_I~ Family+Income_level+`In / Out Patient`+Gender+`Age Group`+Region_pol+Speciality_Co+Source_Co, data = trainP)
+
+coef.pen= (exp(coef(Pen_mod)))
+sink("C:/Users/zidanac/Desktop/Vivli/Pen_mod.txt")
+print(coef.pen)
+sink()
+##########################################################################{}
+
+# Predicting the values for train dataset
+trainP$ClassPredicted <- predict(Pen_mod, newdata = trainP, "class")
+
+# Building classification table
+tabP <- table(trainP$Penicillin_I, trainP$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tabP))/sum(tabP))*100,2) #78.79
+
+# Predicting the class for test dataset
+testP$ClassPredicted <- predict(Pen_mod, newdata = testP, "class")
+##reorer levels
+testP$ClassPredicted<- factor(testP$ClassPredicted, levels=c("Intermediate", "Resistant" ,   "Susceptible" ))
+# Building classification table
+tabP1 <- table(testP$Penicillin_I, testP$ClassPredicted)
+tabP1
+round((sum(diag(tabP1))/sum(tabP1))*100,2)  #78.78
+
+# pp=bind_cols(testP, testP$ClassPredicted)
+# #############
+# plot
+# lpp <- melt(pp, id.vars = c('Family','Income_level','`In / Out Patient`','Gender','`Age Group`','Region_pol','Speciality_Co','Source_Co','Year'), value.name = "probability")
+# head(lpp)
+# pp |> 
+#   ggplot(aes(x = Income_level, y = Speciality_Co)) +
+#   geom_bar(aes(color = ClassPredicted), alpha = 0.1) +
+#   geom_point(data = Pen_df, aes(color = Penicillin_I, shape = Penicillin_I),
+#              size = 2,
+#              alpha = 0.8) +
+#   labs(color = "Penicillin Level", shape = "Penicillin Level") +
+#   theme_light()
+# 
+# Covariate =c('Family','Income_level','`In / Out Patient`','Gender','`Age Group`','Region_pol','Speciality_Co','Source_Co','Year')
+# # coef_plot <-Pen_mod|>
+#   ggplot(aes(y = coefnames, x = Coefficients, pch = Penicillin_I,label = OR)) +
+#   geom_point(aes(y = Covariate, x=estimate), color= "#FF6666") +  
+#   geom_errorbarh(aes(xmax = Upper, xmin = Lower,height = .12), color ="#FF6666",size = 0.6) +  
+#   geom_vline(xintercept =0, linetype = "dashed") +
+#   scale_shape_manual(values = c(0,2,19)) +
+#   geom_text(size = 3, nudge_x = 2,vjust = -0.25) + 
+  # facet_grid(.~Group) +
+  # scale_x_continuous(name ="Regression Coefficients with Odds Ratio", limits=c(-5,5)) +
+  # theme(legend.position = "bottom") 
+
+```
+
+
+
+
+
+
+
+
+
+# Reserve Drugs
+
+## Linozid Model
+
+```{r linozid model}
+#https://glmnet.stanford.edu/articles/glmnet.html
+
+Lin_df= Drug_df[,c(1:13,25)]|>drop_na()
+
+Lin_df <- Lin_df|>
+  rename(Pat_type = `In / Out Patient`)
+
+Lin_df <- Lin_df|>
+  rename(Age_grp = `Age Group`)
+
+Lin_df <- Lin_df|>
+  rename(Lin_I = Linezolid_I)
+
+
+###Creating numeric variables
+
+Lin_df$Family= as.factor(Lin_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Lin_df$Country= as.factor(Lin_df$Country)
+Lin_df$Country_code2= as.factor(Lin_df$Country_code2)
+Lin_df$Income_level =as.factor(Lin_df$Income_level)
+Lin_df$Pat_type =as.factor(Lin_df$Pat_type)
+Lin_df$Gender =as.factor(Lin_df$Gender)
+Lin_df$Age_grp = as.factor(Lin_df$Age_grp)
+Lin_df$Lin_I =as.factor(Lin_df$Lin_I)
+Lin_df$Region_pol =as.factor(Lin_df$Region_pol)
+Lin_df$Speciality_Co = as.factor(Lin_df$Speciality_Co) ##Other not found
+Lin_df$Source_Co = as.factor(Lin_df$Source_Co)
+Lin_df$Phenotype_Co = as.factor(Lin_df$Phenotype_Co) ##only one phetype available ommit
+Lin_df$Year = as.factor(Lin_df$Year)
+########################################################
+
+
+##train and test set
+set.seed(123)
+indexL <- createDataPartition(Lin_df$Lin_I, p = .70, list = FALSE)
+trainL <- Lin_df[indexL,]
+testL <- Lin_df[-indexL,]
+#################################
+##Check data balance
+train_lin <- trainL[,c(1,4,6,7,8,10,11,13,14)]
+test_lin <- testL[,c(1,4,6,7,8,10,11,13,14)]
+under_lin = ovun.sample(Lin_I ~ ., data = train_lin, method = "under" )$data
+
+##only one famuly staphylococcus
+rose_lin <- ROSE(Lin_I~., data = train_lin, N = 2002778, seed=123)$data
+table(rose_lin$Lin_I)
+
+test_rose_lin<-ROSE(Lin_I~., data = test_lin, N = 2002778, seed=123)$data
+##model
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+Lin.mod <- train(Lin_I ~.,  
+                  data = rose_lin[,-1],
+                  method = 'glmnet',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+##PLotting coefficients
+plot(Lin.mod1)
+print(Lin.mod1) ## best lambda and alpha
+coef(Lin.mod1, lambda= 0.0005249035)
+
+##https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+#https://rpubs.com/yanliu/viz_multinomial_regression
+
+##########################################################################{}
+
+# Predicting the values for train dataset
+test_rose_lin$ClassPredicted <- predict(Lin.mod, newdata = test_rose_lin, "raw")
+
+# Building classification table
+tab_lin <- table(test_rose_lin$Lin_I, test_rose_lin$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+Acc_lin<-round((sum(diag(tab_lin))/sum(tab_lin))*100,2) 
+
+varImp(Lin.mod)
+
+predicted_lin <- predict(Lin.mod, newdata = test_rose_lin, type = "raw")
+actual_values <- test_rose_lin$Lin_I  # Replace with your actual test labels
+
+# Calculate prediction error
+prediction_error <- mean((predicted_lin - actual_values)^2)
+
+###############MACHINE Learning#############
+
+library(randomForest)
+set.seed(123)
+#install.packages(ranger, repos = "http://cran.r-project.org")
+
+library(ranger)
+rf_lin <- ranger(
+Lin_I~., 
+   data = rose_lin[-1], 
+   importance = "impurity_corrected",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_lin$mtry
+##acurary
+sum(diag(rf_lin$confusion.matrix)/sum(rf_lin$confusion.matrix))
+##prediction error
+rf_lin$prediction.error
+
+importance(rf_lin)
+
+ImpData.lin <- as.data.frame(importance(rf_lin))
+
+ImpData.lin$Var.Names <- row.names(ImpData.lin)
+##
+ggplot(ImpData.lin, aes(x=Var.Names, y=importance(rf_lin))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_lin)), color="skyblue") +
+  geom_point(aes(size = importance(rf_lin)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Linozoid Model Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.lin.pred <- predict(rf_lin,
+                   data = test_rose_lin,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t_lin=table(rf.lin.pred$predictions, 
+     test_rose_lin$Lin_I)
+
+sum(diag(t_lin))/sum(t_lin)
+
+###############################################################################################
+
+##xgboost make this example reproducible
+library(xgboost)
+set.seed(123)
+
+#define predictor and response variables in training set
+train_x_lin = data.matrix(rose_lin[,1:8])
+train_y_lin = rose_lin[,9]
+
+#define predictor and response variables in testing set
+test_x_lin = data.matrix(test_rose_lin[,1:8])
+test_y_lin= test_rose_lin[,9]
+
+#define final training and testing sets
+xgb_train_lin = xgb.DMatrix(data = train_x_lin, label = train_y_lin)
+xgb_test_lin = xgb.DMatrix(data = test_x_lin, label = test_y_lin)
+
+##the model
+#define watchlist
+##the model
+#define watchlist
+##convert labels to zero and 1
+train_y_lin <- as.numeric(as.factor(train_y_lin)) - 1
+test_y_lin <- as.numeric(as.factor(test_y_lin)) - 1
+
+table(train_y_lin)
+
+params <- list(
+  objective = "binary:logistic",
+  eval_metric = "error"
+)
+
+xgb_lin_Model <- xgb.train(
+  params = params,
+  data = xgb_train_lin,
+  nrounds = 280, ## best 275
+  watchlist = list(train = xgb_train_lin, test = xgb_test_lin),
+  early_stopping_rounds = 10,
+  print_every_n = 10
+)
+
+##evaluations
+Lin_predictions <- predict(xgb_lin_Model, xgb_test_lin)
+predicted_lin_labels <- ifelse(Lin_predictions > 0.5, 1, 0)
+confusionMatrix(factor(predicted_lin_labels), factor(test_y_lin))
+
+## Variable IMPORTANCE
+xgb.importance(model = xgb_lin_Model)
+xgb_Imp_lin <- xgb.importance(feature_names = xgb_lin_Model$feature_names,
+                          model = xgb_lin_Model)
+
+xgb.plot.importance(xgb_Imp_lin)
+##
+xgb.importance(model = lin_xg_final)
+xgb_imp_lin <- xgb.importance(feature_names = lin_xg_final$feature_names,
+                          model = lin_xg_final)
+
+xgb.plot.importance(xgb_imp_lin)
+
+###comparisons
+caret::RMSE(test_y_lin, lin_pred_y)
+
+```
+
+## Colistin models
+
+```{r colis model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+Col_df= Drug_df[,c(1:13,34)]|>drop_na()
+
+Col_df <- Col_df|>
+  rename(Pat_type = `In / Out Patient`)
+
+Col_df <- Col_df|>
+  rename(Age_grp = `Age Group`)
+
+Col_df <- Col_df|>
+  rename(Col_I = Colistin_I)
+
+Col_df$Col_I<-recode(Col_df$Col_I,Intermediate= "Resistant"  ) ## 396 200 all resistant
+## al are resistant
+
+###Creating numeric variables
+
+Col_df$Family= as.factor(Col_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Col_df$Country= as.factor(Col_df$Country)
+Col_df$Country_code2= as.factor(Col_df$Country_code2)
+Col_df$Income_level =as.factor(Col_df$Income_level)
+Col_df$Pat_type=as.factor(Col_df$Pat_type)
+Col_df$Gender =as.factor(Col_df$Gender)
+Col_df$Age_grp= as.factor(Col_df$Age_grp)
+Col_df$Col_I =as.factor(Col_df$Col_I)
+Col_df$Region_pol =as.factor(Col_df$Region_pol)
+Col_df$Speciality_Co = as.factor(Col_df$Speciality_Co) ##Other not found
+Col_df$Source_Co = as.factor(Col_df$Source_Co)
+Col_df$Phenotype_Co = as.factor(Col_df$Phenotype_Co) 
+##only one phetype available ommit
+##Remove unwanted variables
+Col_df <-Col_df[, -c(2,3,5,9,12)]
+
+########################################################
+##train and test set
+indexC <- createDataPartition(Col_df$Colistin_I, p = .70, list = FALSE)
+trainC <- Col_df[indexC,]
+testC <- Col_df[-indexC,]
+#################################
+##model
+
+trainC$Colistin_I <- relevel(trainC$Colistin_I, ref = "Resistant")
+Col_mod <- multinom(Colistin_I~ Family+Income_level+`In / Out Patient`+Gender+`Age Group`+Region_pol+Speciality_Co+Source_Co, data = trainC)
+
+coef.col= (exp(coef(Col_mod)))
+sink("C:/Users/zidanac/Desktop/Vivli/Col_mod.txt")
+print(coef.col)
+sink()
+##########################################################################{}
+
+# Predicting the values for train dataset
+trainC$ClassPredicted <- predict(Col_mod, newdata = trainC, "class")
+
+# Building classification table
+tabC <- table(trainC$Colistin_I, trainC$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tabC))/sum(tabC))*100,2) #[1] 86.68
+
+# Predicting the class for test dataset
+testC$ClassPredicted <- predict(Col_mod, newdata = testC, "class")
+##reorer levels
+testC$ClassPredicted<- factor(testC$ClassPredicted, levels=c("Intermediate", "Resistant" ,   "Susceptible" ))
+# Building classification table
+tabC1 <- table(testC$Colistin_I, testC$ClassPredicted)
+tabC1
+round((sum(diag(tabP1))/sum(tabP1))*100,2) #[1] 78.78
+
+```
+
+# WAtch Drugs
+
+##Azithronycyn
+
+```{r azithro model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+AZ_df= Drug_df[,c(1:13,17)]|>drop_na()
+
+AZ_df <- AZ_df|>
+  rename(Pat_type = `In / Out Patient`)
+
+AZ_df <- AZ_df|>
+  rename(Age_grp = `Age Group`)
+
+AZ_df <- AZ_df|>
+  rename(AZ_I = Azithromycin_I)
+
+AZ_df$AZ_I<-recode(AZ_df$AZ_I,Intermediate= "Resistant"  )
+
+AZ_df <- AZ_df[, -c(2,3,5,9)]
+###Creating numeric variables
+
+AZ_df$Family= as.factor(AZ_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+AZ_df$Income_level =as.factor(AZ_df$Income_level)
+AZ_df$Pat_type =as.factor(AZ_df$Pat_type)
+AZ_df$Gender =as.factor(AZ_df$Gender)
+AZ_df$Age_grp = as.factor(AZ_df$Age_grp)
+AZ_df$AZ_I =as.factor(AZ_df$AZ_I)
+AZ_df$Region_pol =as.factor(AZ_df$Region_pol)
+AZ_df$Speciality_Co = as.factor(AZ_df$Speciality_Co) ##Other not found
+AZ_df$Source_Co = as.factor(AZ_df$Source_Co)
+AZ_df$Phenotype_Co = as.factor(AZ_df$Phenotype_Co) ##only one phetype available ommit
+#AZ_df$Year = as.factor(AZ_df$Year)
+########################################################
+
+##train and test set
+
+
+indexZ <- createDataPartition(AZ_df$AZ_I, p = .70, list = FALSE)
+trainZ <- AZ_df[indexZ,]
+testZ <- AZ_df[-indexZ,]
+#################################
+##model
+##only one famuly staphylococcus
+rose_AZ <- ROSE(AZ_I~., data = trainZ, N = 22786, seed=123)$data
+table(rose_AZ$AZ_I)
+
+test_rose_AZ<-ROSE(AZ_I~., data = testZ, N = , seed=123)$data
+##model
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+AZ.mod <- train(AZ_I ~.,  
+                  data = rose_AZ,
+                  method = 'glmnet',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+##PLotting coefficients
+##https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+#https://rpubs.com/yanliu/viz_multinomial_regression
+
+##########################################################################{}
+
+# Predicting the values for train dataset
+test_rose_AZ$ClassPredicted <- predict(AZ.mod, newdata = test_rose_AZ, "raw")
+
+# Building classification table
+tab_AZ <- table(test_rose_AZ$AZ_I, test_rose_AZ$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tab_AZ))/sum(tab_AZ))*100,2) 
+
+varImp(AZ.mod)
+
+
+
+###############MACHINE Learning#############
+
+library(randomForest)
+set.seed(123)
+#install.packages(ranger, repos = "http://cran.r-project.org")
+
+library(ranger)
+rf_AZ <- ranger(
+AZ_I~., 
+   data = rose_AZ, 
+   importance = "impurity_corrected",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_AZ$mtry
+##acurary
+sum(diag(rf_AZ$confusion.matrix)/sum(rf_AZ$confusion.matrix))
+##prediction error
+rf_AZ$prediction.error
+
+importance(rf_AZ)
+
+ImpData.AZ <- as.data.frame(importance(rf_AZ))
+
+ImpData.AZ$Var.Names <- row.names(ImpData.AZ)
+##
+ggplot(ImpData.AZ, aes(x=Var.Names, y=importance(rf_AZ))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_AZ)), color="skyblue") +
+  geom_point(aes(size = importance(rf_AZ)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Azithromycin Model Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.AZ.pred <- predict(rf_AZ,
+                   data = test_rose_AZ,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t_AZ=table(rf.AZ.pred$predictions, 
+     test_rose_AZ$AZ_I)
+
+sum(diag(t_AZ))/sum(t_AZ)
+
+###############################################################################################
+
+##xgboost make this example reproducible
+library(xgboost)
+set.seed(123)
+
+#define predictor and response variables in training set
+train_x_AZ = data.matrix(rose_AZ[,1:9])
+train_y_AZ = rose_AZ[,10]
+
+#define predictor and response variables in testing set
+test_x_AZ = data.matrix(test_rose_AZ[,1:9])
+test_y_AZ= test_rose_AZ[,10]
+
+#define final training and testing sets
+xgb_train_AZ = xgb.DMatrix(data = train_x_AZ, label = train_y_AZ)
+xgb_test_AZ = xgb.DMatrix(data = test_x_AZ, label = test_y_AZ)
+
+##the model
+#define watchlist
+output_vector = rose_AZ[,"AZ_I"] == "Resistant"
+
+watchlist_AZ = list(train=xgb_train_AZ, test=xgb_test_AZ)
+
+ctrl_AZ <- trainControl(method="repeatedcv", 
+                     number=10, 
+                     repeats=5,
+                     savePredictions=TRUE, 
+                     classProbs=TRUE,
+                     summaryFunction = multiClassSummary)
+
+AZ_xb.model = xgb.train(data = xgb_train_AZ,
+                         watchlist=watchlist_AZ,
+                         label = output_vector,
+                         trControl = ctrl_AZ,
+                         #params = list(
+                      #max_depth = 2, eta = 1, nthread = 2, objective = "binary:logistic"),
+                         #objective = "binary:logistic",
+                         nrounds = 1000)
+
+AZ_xg_final = xgboost(data = xgb_train_AZ, max.depth = 3, nrounds = 1000, verbose = 0)
+summary(AZ_xg_final)
+#use model to make predictions on test data
+AZ_pred_y = predict(AZ_xg_final, xgb_test_AZ)
+
+AZ_predict <- as.numeric(AZ_pred_y > 0.5)
+print(head(AZ_predict))
+# performance metrics on the test data
+
+err <- mean(as.numeric(AZ_pred_y > 0.5) != test_rose_AZ$AZ_I)
+print(paste("test-error=", err))
+
+
+##
+xgb.importance(model = AZ_xg_final)
+xgb_imp_AZ <- xgb.importance(feature_names = AZ_xg_final$feature_names,
+                          model = AZ_xg_final)
+
+xgb.plot.importance(xgb_imp_AZ, rel_to_first = TRUE, xlab = "Relative importance")
+
+library(Ckmeans.1d.dp)
+(gg <- xgb.ggplot.importance(xgb_imp_AZ, measure = "Gain", rel_to_first = TRUE))
+gg + ggplot2::ylab("Relative Importance")+theme_bw()+  # Add your geoms here
+  theme(legend.position = "none")+
+  labs(title = 'Azithromycin Feature Importance Using XGboost')
+
+
+##########################################################################{}
+
+
+```
+
+## Levoflaxicin
+
+```{r levo model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+Levo_df= Drug_df[,c(1:13,24)]|>drop_na()
+
+
+Levo_df <- Levo_df|>
+  rename(Pat_type = `In / Out Patient`)
+
+Levo_df <- Levo_df|>
+  rename(Age_grp = `Age Group`)
+
+Levo_df <- Levo_df|>
+  rename(Levo_I = Levofloxacin_I)
+
+Levo_df$Levo_I<-recode(Levo_df$Levo_I,Intermediate= "Resistant"  )
+
+Levo_df <- Levo_df[, -c(2,3,5,9)]
+###Creating numeric variables
+
+Levo_df$Family= as.factor(Levo_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+Levo_df$Income_level =as.factor(Levo_df$Income_level)
+Levo_df$Pat_type =as.factor(Levo_df$Pat_type)
+Levo_df$Gender =as.factor(Levo_df$Gender)
+Levo_df$Age_grp = as.factor(Levo_df$Age_grp)
+Levo_df$Levo_I =as.factor(Levo_df$Levo_I)
+Levo_df$Region_pol =as.factor(Levo_df$Region_pol)
+Levo_df$Speciality_Co = as.factor(Levo_df$Speciality_Co) ##Other not found
+Levo_df$Source_Co = as.factor(Levo_df$Source_Co)
+Levo_df$Phenotype_Co = as.factor(Levo_df$Phenotype_Co) ##only one phetype available ommit
+#Levo_df$Year = as.factor(Levo_df$Year)
+########################################################
+
+##train and test set
+
+
+index_LV <- createDataPartition(Levo_df$Levo_I, p = .70, list = FALSE)
+train_LV <- Levo_df[index_LV,]
+test_LV <- Levo_df[-index_LV,]
+#################################
+##model
+##only one famuly staphylococcus
+rose_Levo <- ROSE(Levo_I~., data = train_LV, N = 3100000 , seed=123)$data
+table(rose_Levo$Levo_I)
+
+test_rose_Levo<-ROSE(Levo_I~., data = test_LV, N =1300000 , seed=123)$data
+##model
+set.seed(123)
+train.control <- trainControl(method = "repeatedcv",
+                              number = 10,
+                              summaryFunction = twoClassSummary,
+                              classProbs = TRUE)
+Levo.mod <- train(Levo_I ~.,  
+                  data = rose_Levo,
+                  method = 'glmnet',
+                  family= "binomial",
+                  metric = 'ROC',
+                    #tuneGrid = data.frame(nvmax = 1:8),
+                    trControl = train.control
+                    )
+
+##PLotting coefficients
+##https://cran.r-project.org/web/packages/jtools/vignettes/summ.html
+#https://rpubs.com/yanliu/viz_multinomial_regression
+
+##########################################################################{}
+
+# Predicting the values for train dataset
+test_rose_Levo$ClassPredicted <- predict(Levo.mod, newdata = test_rose_Levo, "raw")
+
+# Building classification table
+tab_Levo <- table(test_rose_Levo$Levo_I, test_rose_Levo$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tab_Levo))/sum(tab_Levo))*100,2) 
+
+varImp(Levo.mod)
+
+
+
+###############MACHINE Learning#############
+
+library(randomForest)
+set.seed(123)
+#install.packages(ranger, repos = "http://cran.r-project.org")
+
+library(ranger)
+rf_Levo <- ranger(
+Levo_I~., 
+   data = rose_Levo, 
+   importance = "impurity_corrected",
+   num.trees = 2000
+ )
+# remove missing values before this call
+rf_Levo$mtry
+##acurary
+sum(diag(rf_Levo$confusion.matrix)/sum(rf_Levo$confusion.matrix))
+##prediction error
+rf_Levo$prediction.error
+
+importance(rf_Levo)
+
+ImpData.Levo <- as.data.frame(importance(rf_Levo))
+
+ImpData.AZ$Var.Names <- row.names(ImpData.AZ)
+##
+ggplot(ImpData.Levo, aes(x=Var.Names, y=importance(rf_Levo))) +
+  geom_segment( aes(x=Var.Names, xend=Var.Names, y=0, yend=importance(rf_Levo)), color="skyblue") +
+  geom_point(aes(size = importance(rf_Levo)), color="blue", alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    legend.position="",
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank()
+  )+labs(y= "Importance", x= "Variable", title = 'Levoithromycin Model Variable Importance Using Random Forest')
+
+##model test
+
+#resample test data 
+rf.Levo.pred <- predict(rf_Levo,
+                   data = test_rose_Levo,
+                   type = 'response',
+                   num.trees = 2000)
+
+# Comparing our predictions with test data:
+t_Levo=table(rf.Levo.pred$predictions, 
+     test_rose_Levo$Levo_I)
+
+sum(diag(t_Levo))/sum(t_Levo)
+
+###############################################################################################
+
+##xgboost make this example reproducible
+library(xgboost)
+set.seed(123)
+
+#define predictor and response variables in training set
+train_x_Levo = data.matrix(rose_Levo[,1:9])
+train_y_Levo = rose_Levo[,10]
+
+#define predictor and response variables in testing set
+test_x_Levo = data.matrix(test_rose_Levo[,1:9])
+test_y_Levo= test_rose_Levo[,10]
+
+#define final training and testing sets
+xgb_train_Levo = xgb.DMatrix(data = train_x_Levo, label = train_y_Levo)
+xgb_test_Levo = xgb.DMatrix(data = test_x_Levo, label = test_y_Levo)
+
+##the model
+#define watchlist
+output_vector = rose_Levo[,"Levo_I"] == "Resistant"
+
+watchlist_Levo = list(train=xgb_train_Levo, test=xgb_test_Levo)
+
+ctrl_Levo <- trainControl(method="repeatedcv", 
+                     number=10, 
+                     repeats=5,
+                     savePredictions=TRUE, 
+                     classProbs=TRUE,
+                     summaryFunction = multiClassSummary)
+
+Levo_xb.model = xgb.train(data = xgb_train_Levo,
+                         watchlist=watchlist_Levo,
+                         label = output_vector,
+                         trControl = ctrl_Levo,
+                         #params = list(
+                      #max_depth = 2, eta = 1, nthread = 2, objective = "binary:logistic"),
+                         #objective = "binary:logistic",
+                         nrounds = 1000)
+
+Levo_xg_final = xgboost(data = xgb_train_Levo, max.depth = 3, nrounds = 1000, verbose = 0)
+summary(Levo_xg_final)
+#use model to make predictions on test data
+Levo_pred_y = predict(Levo_xg_final, xgb_test_Levo)
+
+Levo_predict <- as.numeric(Levo_pred_y > 0.5)
+print(head(Levo_predict))
+# performance metrics on the test data
+
+err <- mean(as.numeric(Levo_pred_y > 0.5) != test_rose_Levo$Levo_I)
+print(paste("test-error=", err))
+
+
+##
+xgb.importance(model = Levo_xg_final)
+xgb_imp_Levo <- xgb.importance(feature_names = Levo_xg_final$feature_names,
+                          model = Levo_xg_final)
+
+xgb.plot.importance(xgb_imp_Levo, rel_to_first = TRUE, xlab = "Relative importance")
+
+library(Ckmeans.1d.dp)
+(gg <- xgb.ggplot.importance(xgb_imp_Levo, measure = "Gain", rel_to_first = TRUE))
+gg + ggplot2::ylab("Relative Importance")+theme_bw()+  # Add your geoms here
+  theme(legend.position = "none")+
+  labs(title = ' Levofloxacin Feature Importance Using XGboost')
+
+
+```
+
+##Vancomycin
+
+```{r vanco model}
+#https://stats.oarc.ucla.edu/r/dae/multinomial-logistic-regression/
+#https://www.r-bloggers.com/2020/05/multinomial-logistic-regression-with-r/
+
+Van_df= Drug_df[,c(1:13,29)]|>drop_na(Vancomycin_I)
+
+
+
+###Creating numeric variables
+
+Van_df$Family= as.factor(Van_df$Family)  ##Enterobacteriaceae" and"Streptococcus pneumoniae"        
+#Van_df$Country= as.factor(Van_df$Country)
+Van_df$Country_code2= as.factor(Van_df$Country_code2)
+Van_df$Income_level =as.factor(Van_df$Income_level)
+Van_df$`In / Out Patient` =as.factor(Van_df$`In / Out Patient`)
+Van_df$Gender =as.factor(Van_df$Gender)
+Van_df$`Age Group` = as.factor(Van_df$`Age Group`)
+Van_df$Vancomycin_I =as.factor(Van_df$Vancomycin_I)
+Van_df$Region_pol =as.factor(Van_df$Region_pol)
+Van_df$Speciality_Co = as.factor(Van_df$Speciality_Co) ##Other not found
+Van_df$Source_Co = as.factor(Van_df$Source_Co)
+Van_df$Phenotype_Co = as.factor(Van_df$Phenotype_Co) ##only one phetype available ommit
+Van_df$Year = as.factor(Van_df$Year)
+########################################################
+
+##train and test set
+
+
+indexV <- createDataPartition(Van_df$Vancomycin_I, p = .70, list = FALSE)
+trainV <- Van_df[indexV,]
+testV <- Van_df[-indexV,]
+#################################
+##model
+
+trainV$Vancomycin_I <- relevel(trainV$Vancomycin_I, ref = "Resistant")
+Van_mod <- multinom(Vancomycin_I~ Family+Income_level+`In / Out Patient`+Gender+`Age Group`+Region_pol+Speciality_Co+Source_Co, data = trainV)
+
+coef.van= (exp(coef(Van_mod)))
+sink("C:/Users/zidanac/Desktop/Vivli/Van_mod.txt")
+print(coef.van)
+sink()
+##########################################################################{}
+
+# Predicting the values for train dataset
+trainV$ClassPredicted <- predict(Van_mod, newdata = trainV, "class")
+
+# Building classification table
+tabV <- table(trainV$Vancomycin_I, trainV$ClassPredicted)
+
+# Calculating accuracy - sum of diagonal elements divided by total obs
+round((sum(diag(tabV))/sum(tabV))*100,2) #[1] 97.97
+
+# Predicting the class for test dataset
+testV$ClassPredicted <- predict(Van_mod, newdata = testV, "class")
+##reorer levels
+testV$ClassPredicted<- factor(testV$ClassPredicted, levels=c("Intermediate", "Resistant" ,   "Susceptible" ))
+# Building classification table
+tabV <- table(testV$Vancomycin_I, testV$ClassPredicted)
+tabV
+round((sum(diag(tabV))/sum(tabV))*100,2) #[1] 97.97
+
+```
+
+# OVERALL MODELS
+
+<!-- ```{r model2} -->
+
+<!-- #Splitting the data using a function from dplyr package -->
+
+<!-- library(caret) -->
+
+<!-- index <- createDataPartition(drug_family$Resistance_Status, p = .70, list = FALSE) -->
+
+<!-- train <- drug_family[index,] -->
+
+<!-- test <- drug_family[-index,] -->
+
+<!-- ## relevel ref -->
+
+<!-- train$Status <- relevel(drug_family$Resistance_Status, ref = "Resistant") -->
+
+<!-- Amp.mod <- multinom(Resistance_Status ~ Family+Country_code2+Income_level+`In / Out Patient`+Gender+`Age Group`+Region_pol+Speciality_Co+Source_Co+Drug_class, data = drug_family) -->
+
+<!-- ``` -->
+
+<!-- ```{r clustering} -->
+
+<!-- ####cluster by gower distance -->
+
+<!--  library(vegan) -->
+
+<!-- library(cluster) -->
+
+<!-- gower_dist <- daisy(Amoxy_df[, c(1,3:11,13,15)], metric = "gower") -->
+
+<!-- gower_mat <- as.matrix(gower_dist) -->
+
+<!-- #' Print most similar clients -->
+
+<!-- Amoxy_df[which(gower_mat == min(gower_mat[gower_mat != min(gower_mat)]), arr.ind = TRUE)[1, ], ] -->
+
+<!-- #' Print most dissimilar clients -->
+
+<!-- Amoxy_df[which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]), arr.ind = TRUE)[1, ], ] -->
+
+<!-- ## number of cluster is 2/3 -->
+
+<!-- sil_width <- c(NA) -->
+
+<!-- for(i in 2:10){   -->
+
+<!--   pam_fit1 <- pam(gower_dist, diss = TRUE, k = i)   -->
+
+<!--   sil_width[i] <- pam_fit1$silinfo$avg.width   -->
+
+<!-- } -->
+
+<!-- plot(1:10, sil_width, -->
+
+<!--      xlab = "Number of clusters", -->
+
+<!--      ylab = "Silhouette Width") -->
+
+<!-- lines(1:10, sil_width) -->
+
+<!-- ####################################### -->
+
+<!-- library(dplyr) -->
+
+<!-- k <- 2 -->
+
+<!-- tpam_fit1 <- pam(gower_dist, diss = TRUE, k) -->
+
+<!-- tpam_results1 <- Amikacin_df %>% -->
+
+<!--   mutate(cluster = tpam_fit1$clustering) %>% -->
+
+<!--   group_by(cluster) %>% -->
+
+<!--   do(the_summary = summary(.)) -->
+
+<!-- ###cluster by country -->
+
+<!-- pam_fit1 <- pam(gower_mat, diss = TRUE, k = 4) -->
+
+<!-- Amikacin_df$pam_cluster <- factor(pam_fit$clustering) -->
+
+<!-- ###maping -->
+
+<!-- library(rworldmap) -->
+
+<!-- mapped_data <- joinCountryData2Map(Amikacin_df,  -->
+
+<!--                                    joinCode = "ISO2",  -->
+
+<!--                                    nameJoinColumn = "Country_code2",  -->
+
+<!--                                    suggestForFailedCodes = TRUE) -->
+
+<!-- mapCountryData(mapped_data,  -->
+
+<!--                nameColumnToPlot = "pam_cluster",  -->
+
+<!--                colourPalette = cbbPalette[1:length(pam_fit$medoids)],  -->
+
+<!--                mapTitle = "Amikacin Resistance Clusters", -->
+
+<!--                catMethod = "categorical", -->
+
+<!--                addLegend = TRUE) -->
+
+<!-- ################################## -->
+
+<!-- ##cluster summary -->
+
+<!-- print(tpam_results1$the_summary,floating=FALSE,latex.environments=NULL,booktabs=TRUE) -->
+
+<!-- Amikacin_df[tpam_fit1$medoids, ] -->
+
+<!-- #### Ploting -->
+
+<!-- library(Rtsne) -->
+
+<!-- tsne_obj11 <- Rtsne(gower_dist, is_distance = TRUE) -->
+
+<!-- tsne_data11 <- tsne_obj11$Y %>% -->
+
+<!--   data.frame() %>% -->
+
+<!--   setNames(c("X", "Y")) %>% -->
+
+<!--   mutate(cluster = factor(tpam_fit1$clustering)) -->
+
+<!-- ggplot(aes(x = X, y = Y), data = tsne_data11) + -->
+
+<!--   geom_point(aes(color = cluster))+theme_classic() -->
+
+<!-- ################################################################################## -->
+
+<!-- ##by Jaccard -->
+
+<!-- dist_matrix <- vegdist(Amikacin_df[, -c(7,12)], method = "jaccard", na.rm = TRUE) -->
+
+<!-- ##PAM -->
+
+<!-- sil_width <- c(NA) -->
+
+<!-- for(i in 2:10){ -->
+
+<!--   pam_fit <- pam(dist_matrix, -->
+
+<!--                  diss = TRUE, -->
+
+<!--                  k = i) -->
+
+<!--   sil_width[i] <- pam_fit$silinfo$avg.width -->
+
+<!-- } -->
+
+<!-- ###visualising -->
+
+<!-- df_pam_sil <- data.frame(k = c(1:10), sil_width) -->
+
+<!-- ggplot(df_pam_sil, aes(x = k, y = sil_width)) + -->
+
+<!--   geom_col() + -->
+
+<!--   labs(y = "Silhouette width")  -->
+
+<!-- ##gathering clusters -->
+
+<!-- pam_fit <- pam(dist_matrix, diss = TRUE, k = 4) -->
+
+<!-- Amikacin_df$pam_cluster <- factor(pam_fit$clustering) -->
+
+<!-- ####### -->
+
+<!-- library(rworldmap) -->
+
+<!-- mapped_data <- joinCountryData2Map(Amikacin_df,  -->
+
+<!--                                    joinCode = "ISO2",  -->
+
+<!--                                    nameJoinColumn = "Country_code",  -->
+
+<!--                                    suggestForFailedCodes = TRUE) -->
+
+<!-- ``` -->
+
+<!-- ##################################################################### -->
+
+<!-- ##By Region -->
+
+<!-- ms= Amikacin_df%>% -->
+
+<!--   group_by(Region_pol, Amikacin_I) |> -->
+
+<!--   summarise(FREQ= n(), na.rm = FALSE)|> -->
+
+<!--   drop_na()|> -->
+
+<!--   mutate(PROP = round(FREQ / sum(FREQ), 2)) -->
+
+<!-- ##By COunt  -->
+
+<!-- ggline(ms, x = "Region_pol", y = "FREQ",  -->
+
+<!--        color = "Amikacin_I",  -->
+
+<!--        title = "Amikacin Resistance by Region", -->
+
+<!--        xlab = 'Geographical Region', -->
+
+<!--        ylab = "Frequency", -->
+
+<!--        palette = "aaas") -->
+
+<!-- ##Proportions -->
+
+<!-- ggline(ms, x = "Region_pol", y = "PROP",  -->
+
+<!--        color = "Amikacin_I",  -->
+
+<!--        title = "Amikacin Resistance Proportion by Region", -->
+
+<!--        xlab = 'Geographical Region', -->
+
+<!--        ylab = "Proportion", -->
+
+<!--       palette = "aaas") -->
+
+<!-- ``` -->
+
+<!-- ### Amikacinn by Phenotype -->
+
+<!-- ```{r ami_pheno} -->
+
+<!-- m2= Amikacin_df%>% -->
+
+<!--   group_by(Phenotype_Co, Amikacin_I) |> -->
+
+<!--   summarise(FREQ= n(), na.rm = FALSE)|> -->
+
+<!--   drop_na() ##only present in BL_pos -->
+
+<!-- ``` -->
+
+<!-- ### Amikacin Overall Resistant Trends -->
+
+<!-- - ovreall ince=arese 2008-2009 -->
+
+<!-- - increasing from 2018-2021 -->
+
+<!-- ```{r oveal_trends} -->
+
+<!-- mY= Amikacin_df%>% -->
+
+<!--   group_by(Year, Amikacin_I) |> -->
+
+<!--   summarise(FREQ= n(), na.rm = FALSE)|> -->
+
+<!--   drop_na()|> -->
+
+<!--   mutate(PROP = round(FREQ / sum(FREQ), 2)) -->
+
+<!-- ggline(mY, x = "Year", y = "FREQ",  -->
+
+<!--        color = "Amikacin_I",  -->
+
+<!--        title = "Amikacin Resistance Trends", -->
+
+<!--        xlab = 'Year', -->
+
+<!--        ylab = "Frequency", -->
+
+<!--        palette = "aaas") -->
+
+<!-- ggline(mY, x = "Year", y = "PROP",  -->
+
+<!--        color = "Amikacin_I",  -->
+
+<!--        title = "Amikacin Resistance Proportion Trends", -->
+
+<!--        xlab = 'Year', -->
+
+<!--        ylab = "Proportion", -->
+
+<!--        palette = "aaas") -->
+
+<!-- ``` -->
+
+<!-- ### Amikacin Resistant Trends by region -->
+
+<!-- ```{r amik_regio_te} -->
+
+<!-- MYR= Amikacin_df%>% -->
+
+<!--   group_by(Year, Amikacin_I, Region_pol) |> -->
+
+<!--   summarise(FREQ= n(), na.rm = FALSE)|> -->
+
+<!--   drop_na()|> -->
+
+<!--   mutate(PROP = round(FREQ / sum(FREQ), 2)) -->
+
+<!-- ggline(MYR, x = "Year", y = "PROP",  -->
+
+<!--        color =  "Amikacin_I",  -->
+
+<!--        title = "Amikacin Resistance Proportion Trends", -->
+
+<!--        nuxlab = 'Year', -->
+
+<!--        ylab = "Proportion", -->
+
+<!--        facet.by = "Region_pol", -->
+
+<!--        palette = "aaas") -->
+
+<!-- MRF= Amikacin_df%>% -->
+
+<!--   group_by(Family, Amikacin_I) |> -->
+
+<!--   summarise(FREQ= n(), na.rm = FALSE)|> -->
+
+<!--   drop_na()|> -->
+
+<!--     mutate(PROP = round(FREQ / sum(FREQ), 2)) -->
+
+<!-- ggbarplot(MRF, x = "Family", y = "PROP",  -->
+
+<!--        fill =  "Amikacin_I",  -->
+
+<!--        title = "Amikacin Resistance Proportion Trends", -->
+
+<!--        #nuxlab = 'Year', -->
+
+<!--        ylab = "Proportion", -->
+
+<!--        #facet.by = "Region_pol", -->
+
+<!--        palette = "aaas") -->
+
+<!-- ``` -->
+
+<!-- ###FRAMESBY DRUG -->
+
+<!-- Amoxycilin= AMR_data[, c(1:13, 16:17,127, 128)] -->
+
+<!-- Ampicilin= AMR_data[, c(1:13, 18:19,127, 128)] -->
+
+<!-- Azithromycin= AMR_data[, c(1:13, 20:21,127, 128)] -->
+
+<!-- Cefepime =AMR_data[, c(1:13, 22:23,127, 128)] -->
+
+<!-- Cefoxitin =AMR_data[, c(1:13, 22:25,127, 128)] -->
+
+<!-- ``` -->
+
+<!-- ## Data Analysis -->
+
+<!-- ```{r cars} -->
+
+<!-- AMP=as.data.frame(table(Amikacin_df$Amikacin_I,Amikacin_df$Region)) -->
+
+<!-- ggline(AMP, "Region", "Freq", color = "Amikacin_I") -->
+
+<!-- Amikacin_df|>ggline(  "Year", "Freq", color = "Amikacin_I") -->
+
+<!-- Amikacing_df|>ggbarplot(  "Region", "Freq", fill = "Ampicillin_I") -->
+
+<!-- Amikacing_df|>ggline( "Region", "Freq", color = "Ampicillin_I") -->
+
+<!-- ggline(data=AMP,  "Year", "Freq", color = "Ampicillin_I") -->
+
+<!-- AMR_data |>group_by(Country)|> ggbarplot("Year", "Ampicillin_I", fill= "Ampicillin_I") -->
+
+<!-- t1= as.data.frame(table(Gender, `Age Group`)) -->
+
+<!-- ggbarplot(data=t1,  "Age.Group", "Freq", fill = "Gender") -->
+
+<!-- ``` -->
+
+<!-- ## Clustering -->
+
+<!-- You can also embed plots, for example: -->
+
+<!-- ```{r cluster, echo=FALSE} -->
+
+<!-- gower_dist11 <- daisy(Ptidy1, metric = "gower") -->
+
+<!-- gower_mat11 <- as.matrix(gower_dist11) -->
+
+<!-- #' Print most similar clients -->
+
+<!-- Ptidy1[which(gower_mat11 == min(gower_mat11[gower_mat11 != min(gower_mat11)]), arr.ind = TRUE)[1, ], ] -->
+
+<!-- #' Print most dissimilar clients -->
+
+<!-- Ptidy1[which(gower_mat11 == max(gower_mat11[gower_mat11 != max(gower_mat11)]), arr.ind = TRUE)[1, ], ] -->
+
+<!-- ## number of cluster is 2/3 -->
+
+<!-- sil_width11 <- c(NA) -->
+
+<!-- for(i in 2:15){   -->
+
+<!--   pam_fit11 <- pam(gower_dist11, diss = TRUE, k = i)   -->
+
+<!--   sil_width11[i] <- pam_fit11$silinfo$avg.width   -->
+
+<!-- } -->
+
+<!-- plot(1:15, sil_width11, -->
+
+<!--      xlab = "Number of clusters", -->
+
+<!--      ylab = "Silhouette Width") -->
+
+<!-- lines(1:15, sil_width11) -->
+
+<!-- ####################################### -->
+
+<!-- library(dplyr) -->
+
+<!-- k <- 3 -->
+
+<!-- tpam_fit1 <- pam(gower_dist11, diss = TRUE, k) -->
+
+<!-- tpam_results1 <- Ptidy1 %>% -->
+
+<!--   mutate(cluster = tpam_fit1$clustering) %>% -->
+
+<!--   group_by(cluster) %>% -->
+
+<!--   do(the_summary = summary(.)) -->
+
+<!-- ##cluster summary -->
+
+<!-- print(tpam_results1$the_summary,floating=FALSE,latex.environments=NULL,booktabs=TRUE) -->
+
+<!-- Ptidy1[tpam_fit1$medoids, ] -->
+
+<!-- #### Ploting -->
+
+<!-- library(Rtsne) -->
+
+<!-- tsne_obj11 <- Rtsne(gower_dist11, is_distance = TRUE) -->
+
+<!-- tsne_data11 <- tsne_obj11$Y %>% -->
+
+<!--   data.frame() %>% -->
+
+<!--   setNames(c("X", "Y")) %>% -->
+
+<!--   mutate(cluster = factor(tpam_fit1$clustering)) -->
+
+<!-- ggplot(aes(x = X, y = Y), data = tsne_data11) + -->
+
+<!--   geom_point(aes(color = cluster))+theme_classic() -->
+
+<!-- ############################################# -->
+
+<!-- ``` -->
+
+<!-- Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot. -->
